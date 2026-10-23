@@ -25,21 +25,26 @@ have nothing to learn from and expand the data.
   after the radio read, so APRS-IS gating, digipeating, KISS, MQTT and the map all see ordinary text.
 * Transmit: off by default. Set `"compressTx": true` in the `lora` block of `igate_conf.json`.
   (No web-UI checkbox yet: the UI is shipped as pre-compressed assets.)
-* Flash cost: about 170 KB for the model tables. RAM: about 2 KB of stack while coding.
+* Flash cost: about 130 KB for the model tables. RAM: about 2 KB of stack while coding.
 
 ## Measured (host test, held-out stations the model never saw)
 
-Training: real LoRa APRS-IS packets plus RF-heard VHF APRS packets, split 70/30 by station.
-Mean frame including the 3-byte header, 8-bit-clean round trip checked on every packet:
+Training: real LoRa APRS-IS packets plus RF-heard VHF APRS packets (14,186 unique), trained on
+70% of stations and tested on the other 30% (4,514 packets). Mean frame including the 3-byte
+header; every packet round-trips bit-exactly, and ~4,700 mutated/truncated real packets per run
+were fuzzed with no failures. `--min-count` prunes rare contexts: the table size/ratio dial.
 
-| Test set | Plain frame | APRS-PPM v1 | Saved |
-|---|---|---|---|
-| LoRa APRS (439 packets) | 78.1 B | 38.0 B | 51% |
-| VHF APRS (834 packets) | 79.6 B | 37.4 B | 53% |
+| `--min-count` | Table size (70% data) | Saved |
+|---|---|---|
+| 4 | 179 KB | 52% |
+| 6 | 121 KB | 50% |
+| 8 | 94 KB | 48% |
+| 12 | 64 KB | 45% |
+| 20 | 39 KB | 42% |
 
-Each set was also fuzzed with ~4,700 mutated and truncated real packets: no round-trip failures.
-More training data improves both the ratio and, with more contexts, the table size, so v1 is
-a starting point.
+The shipped table (v1) is trained on all data at min count 8: 125 KB of flash, so expect about
+48-50% on stations it has not seen (the in-sample figure is higher and not representative).
+Whole-firmware flash on the ttgo-lora32-v21 build goes from 81.5% to 88.1%.
 
 ## Retrain
 
