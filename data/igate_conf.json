@@ -51,7 +51,8 @@
         "txCodingRate4": 5,
         "txSignalBandwidth": 125000,
         "power": 20,
-        "cadActive": true
+        "cadActive": true,
+        "compressTx": false
     },
     "display": {
         "alwaysOn": true,

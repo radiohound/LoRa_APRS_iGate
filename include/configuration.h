@@ -88,6 +88,7 @@ public:
     long    txSignalBandwidth;
     int     power;
     bool    cadActive;
+    bool    compressTx;     // experimental: send order-3 compressed frames (receivers always decode them)
 };
 
 class Display {

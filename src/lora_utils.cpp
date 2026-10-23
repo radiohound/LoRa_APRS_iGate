@@ -29,6 +29,7 @@
 #include "display.h"
 #include "utils.h"
 #include "thermal_utils.h"
+#include "AprsCompress.h"
 
 
 extern Configuration    Config;
@@ -92,6 +93,43 @@ namespace LoRa_Utils {
             if (c < 32 || c == 127) out.setCharAt(i, '.');
         }
         return out;
+    }
+
+    // Reads the frame the radio just received. A compressed frame (see AprsCompress) is expanded
+    // back to "\x3c\xff\x01" + text, so everything after this sees the same packets as before.
+    // Reads into a byte buffer: RadioLib's String overload stops at the first NUL byte.
+    static int16_t readFrame(String& packet) {
+        size_t len = radio.getPacketLength();
+        if (len > 255) len = 255;
+        uint8_t buf[256];
+        int16_t state = radio.readData(buf, len);
+        if (state == RADIOLIB_ERR_NONE || state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_LORA_HEADER_DAMAGED) {
+            if (state == RADIOLIB_ERR_NONE && AprsCompress::isCompressedHeader(buf, len)) {
+                uint8_t text[AprsCompress::MAX_TEXT + 1];
+                size_t n = AprsCompress::decodeFrame(buf, len, text, AprsCompress::MAX_TEXT);
+                if (n == 0) return RADIOLIB_ERR_UNKNOWN;
+                text[n] = 0;
+                packet = "\x3c\xff\x01" + String(reinterpret_cast<char*>(text));
+                Utils::println("Compressed frame: " + String(len) + " B on air, " + String(n + 3) + " B expanded");
+            } else {
+                buf[len] = 0;
+                packet = String(reinterpret_cast<char*>(buf));
+            }
+        }
+        return state;
+    }
+
+    // Sends one packet, compressed when enabled and when that makes the frame smaller.
+    static int16_t transmitText(const String& text) {
+        if (Config.loramodule.compressTx) {
+            uint8_t frame[256];
+            size_t n = AprsCompress::encodeFrame(reinterpret_cast<const uint8_t*>(text.c_str()), text.length(), frame, sizeof(frame));
+            if (n > 0) {
+                Utils::println("Compressed frame: " + String(n) + " B instead of " + String(text.length() + 3) + " B");
+                return radio.transmit(frame, n);
+            }
+        }
+        return radio.transmit("\x3c\xff\x01" + text);
     }
 
     void setFlag(void) {
@@ -275,7 +313,7 @@ namespace LoRa_Utils {
             #ifdef FAN_CTRL_PIN
                 THERMAL_Utils::onTxStart();
             #endif
-            int state = radio.transmit("\x3c\xff\x01" + newPacket);
+            int state = transmitText(newPacket);
             #ifdef FAN_CTRL_PIN
                 THERMAL_Utils::onTxEnd();
             #endif
@@ -304,7 +342,7 @@ namespace LoRa_Utils {
 
     String receivePacketFromSleep() {
         String packet = "";
-        int state = radio.readData(packet);
+        int state = readFrame(packet);
         if (state == RADIOLIB_ERR_NONE) {
             Utils::println("<--- LoRa Packet Rx : " + packet.substring(3));
         } else {
@@ -321,7 +359,7 @@ namespace LoRa_Utils {
                 radio.startReceive();
                 transmitFlag = false;
             } else {
-                int state = radio.readData(packet);
+                int state = readFrame(packet);
                 if (state == RADIOLIB_ERR_NONE) {
                     if (packet != "") {
 
