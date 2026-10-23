@@ -34,6 +34,11 @@ namespace LoRa_Utils {
     void    wakeRadio();
     void    sleepRadio();
 
+    // Used by the optional over-the-air self-test (APRS_PPM_SELFTEST):
+    void    setForceCompress(int mode);     // -1 = follow lora.compressTx, 0 = plain, 1 = compressed
+    bool    lastRxWasCompressed();
+    size_t  lastRxAirBytes();
+
 }
 
 #endif

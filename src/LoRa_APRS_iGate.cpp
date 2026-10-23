@@ -55,6 +55,9 @@ ___________________________________________________________________*/
 #include "thermal_utils.h"
 #include "mqtt_utils.h"
 #include "lora_utils.h"
+#ifdef APRS_PPM_SELFTEST
+    #include "ppm_selftest.h"
+#endif
 #include "wifi_utils.h"
 #include "digi_utils.h"
 #include "gps_utils.h"
@@ -114,6 +117,9 @@ void setup() {
     #endif
     Utils::setupDisplay();
     LoRa_Utils::setup();
+    #ifdef APRS_PPM_SELFTEST
+        PPM_SelfTest::begin();
+    #endif
     Utils::validateFreqs();
     GPS_Utils::setup();
     STATION_Utils::loadBlacklistAndManagers();
@@ -197,6 +203,10 @@ void loop() {
         if (Config.loramodule.rxActive) {
             packet = LoRa_Utils::receivePacket(); // We need to fetch LoRa packet above APRSIS and Digi
         }
+        #ifdef APRS_PPM_SELFTEST
+            PPM_SelfTest::loop();
+            if (packet != "" && PPM_SelfTest::consume(packet)) packet = "";   // test packets stop here
+        #endif
 
         if (packet != "") {
             if (Config.aprs_is.active) {    // If APRSIS enabled

@@ -60,6 +60,18 @@ and run the host test on `test.txt` (the shipped table is trained on everything)
         lib/AprsCompress/src/AprsCompress.cpp lib/AprsCompress/src/AprsCompressModel.cpp -o test_host
     ./test_host test.txt
 
+## Over-the-air self-test (build option)
+
+Not part of a normal build. Two flags turn it on:
+
+    -DAPRS_PPM_SELFTEST            check every received test packet; keep them away from APRS-IS/digi/KISS/MQTT
+    -DAPRS_PPM_SELFTEST_TX=20      also send one test packet every 20 s (14 packets, first compressed, then plain)
+
+    PLATFORMIO_BUILD_FLAGS="-DAPRS_PPM_SELFTEST -DAPRS_PPM_SELFTEST_TX=20" pio run -e <env> -t upload
+
+The packet list is `lib/AprsCompress/src/AprsCompressSelfTest.cpp`; `test_selftest_host.cpp` checks it
+on a PC. The full procedure and pass/fail criteria are in the ideas repo, `docs/over-the-air-test.md`.
+
 ## Not yet tested
 
 Over-the-air operation on real hardware: the firmware builds for `ttgo-lora32-v21`, and the codec

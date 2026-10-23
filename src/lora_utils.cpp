@@ -98,11 +98,21 @@ namespace LoRa_Utils {
     // Reads the frame the radio just received. A compressed frame (see AprsCompress) is expanded
     // back to "\x3c\xff\x01" + text, so everything after this sees the same packets as before.
     // Reads into a byte buffer: RadioLib's String overload stops at the first NUL byte.
+    static int  forceCompress  = -1;        // -1 = follow Config.loramodule.compressTx
+    static bool rxCompressed   = false;
+    static size_t rxAirBytes   = 0;
+
+    void setForceCompress(int mode) { forceCompress = mode; }
+    bool lastRxWasCompressed()      { return rxCompressed; }
+    size_t lastRxAirBytes()         { return rxAirBytes; }
+
     static int16_t readFrame(String& packet) {
         size_t len = radio.getPacketLength();
         if (len > 255) len = 255;
         uint8_t buf[256];
         int16_t state = radio.readData(buf, len);
+        rxAirBytes = len;
+        rxCompressed = false;
         if (state == RADIOLIB_ERR_NONE || state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_LORA_HEADER_DAMAGED) {
             if (state == RADIOLIB_ERR_NONE && AprsCompress::isCompressedHeader(buf, len)) {
                 uint8_t text[AprsCompress::MAX_TEXT + 1];
@@ -110,6 +120,7 @@ namespace LoRa_Utils {
                 if (n == 0) return RADIOLIB_ERR_UNKNOWN;
                 text[n] = 0;
                 packet = "\x3c\xff\x01" + String(reinterpret_cast<char*>(text));
+                rxCompressed = true;
                 Utils::println("Compressed frame: " + String(len) + " B on air, " + String(n + 3) + " B expanded");
             } else {
                 buf[len] = 0;
@@ -121,7 +132,8 @@ namespace LoRa_Utils {
 
     // Sends one packet, compressed when enabled and when that makes the frame smaller.
     static int16_t transmitText(const String& text) {
-        if (Config.loramodule.compressTx) {
+        bool useCompression = (forceCompress < 0) ? Config.loramodule.compressTx : (forceCompress == 1);
+        if (useCompression) {
             uint8_t frame[256];
             size_t n = AprsCompress::encodeFrame(reinterpret_cast<const uint8_t*>(text.c_str()), text.length(), frame, sizeof(frame));
             if (n > 0) {
