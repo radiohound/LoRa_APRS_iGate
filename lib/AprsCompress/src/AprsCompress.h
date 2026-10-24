@@ -19,7 +19,9 @@ namespace AprsCompress {
 
     constexpr uint8_t  HEADER_0     = 0x3C;
     constexpr uint8_t  HEADER_1     = 0xFF;
-    constexpr uint8_t  VERSION_FLAG = 0x80;     // third header byte = VERSION_FLAG | modelVersion
+    constexpr uint8_t  VERSION_FLAG = 0x80;     // third header byte = VERSION_FLAG | modelVersion (1..63)
+    constexpr uint8_t  PRIMED_FLAG  = 0x40;     // primed frame: third header byte = VERSION_FLAG | PRIMED_FLAG | modelVersion
+    constexpr uint32_t PRIME_WEIGHT = 512;      // count added per matching position of the reference packet
     constexpr size_t   MAX_TEXT     = 255;
 
     uint8_t modelVersion();
@@ -35,6 +37,24 @@ namespace AprsCompress {
     // Decode a complete on-air frame back to text (without the 3-byte header).
     // Returns the text length, or 0 on error (wrong header, bad length, output too small).
     size_t  decodeFrame(const uint8_t* frame, size_t frameLen, uint8_t* text, size_t textCap);
+
+    // ---- Primed frames (spec 08 of the APRS-PPM proposal) ----
+    // On air: 0x3C 0xFF (0xC0 | modelVersion) <station id> <reference check> <length> <coded bytes>
+    //   station id      = CRC-8 of the source callsign (the text before the first '>')
+    //   reference check = CRC-8 of the whole reference text
+    // The reference is the text of the same station's earlier packet; sender and receiver must hold
+    // the same bytes or the frame is dropped. Same model tables as the full frame.
+    uint8_t crc8(const uint8_t* p, size_t n);                   // polynomial 0x07, init 0, no reflection
+    uint8_t stationId(const uint8_t* text, size_t len);
+    bool    isPrimedHeader(const uint8_t* frame, size_t len);
+    // Reads the two header bytes a receiver uses to choose its reference. False if not a primed frame.
+    bool    primedHeader(const uint8_t* frame, size_t len, uint8_t& id, uint8_t& refCheck);
+    // Returns the frame length, or 0 if it does not fit or is not smaller than 3 + textLen.
+    size_t  encodePrimed(const uint8_t* ref, size_t refLen, const uint8_t* text, size_t textLen,
+                         uint8_t* frame, size_t frameCap);
+    // Returns the text length, or 0 (not primed, wrong reference, bad data).
+    size_t  decodePrimed(const uint8_t* ref, size_t refLen, const uint8_t* frame, size_t frameLen,
+                         uint8_t* text, size_t textCap);
 }
 
 #endif

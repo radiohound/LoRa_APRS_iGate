@@ -19,11 +19,29 @@ have nothing to learn from and expand the data.
 * The coder is integer-only (no floats), so every device decodes exactly what was encoded.
 * A frame is only sent compressed when it is smaller than the plain frame.
 
+## Primed frames (second frame type)
+
+    0x3C 0xFF (0xC0 | model version)  <station id>  <reference check>  <length>  <range-coded bytes>
+
+A **primed** frame is coded with the same model plus the statistics of the same station's **last full or plain
+packet**, so text that repeats (comment, symbol, path, most of the position) costs almost nothing. The station
+id (CRC-8 of the source callsign) tells the receiver which stored packet to use; the reference check (CRC-8 of
+that packet's text) lets it reject a frame whose reference it does not hold. Model v1 primed is `0xC1`. It costs
+2 bytes more than a full frame. In a measurement on real packets (stations the model had not seen) a primed
+frame averaged 21 B against 33 B for a full frame and 60 B plain. See spec 08 in the
+`aprs-compression-proposal` repo, which also defines the format exactly.
+
+* A full frame (or plain) goes out at least every Nth packet per station (`compressFullEvery`, default 2); the
+  ones between are primed. A lost primed frame costs nothing else; a lost full frame costs the primed frames
+  that refer to it, which the receiver drops (log line `Primed frame dropped: no matching reference`).
+* RAM: two small stores (24 stations each, about 6.5 KB each) hold the last packet per station.
+
 ## In this firmware
 
 * Receive: always on. A compressed frame is expanded to the plain `<\xff\x01` + text form right
   after the radio read, so APRS-IS gating, digipeating, KISS, MQTT and the map all see ordinary text.
 * Transmit: off by default. Set `"compressTx": true` in the `lora` block of `igate_conf.json`.
+  `"compressFullEvery": 2` (a full frame at least every 2nd packet per station; 1 turns priming off, 4 sends three primed frames between full ones).
   (No web-UI checkbox yet: the UI is shipped as pre-compressed assets.)
 * Flash cost: about 130 KB for the model tables. RAM: about 2 KB of stack while coding.
 
@@ -53,6 +71,16 @@ Whole-firmware flash on the ttgo-lora32-v21 build goes from 81.5% to 88.1%.
 
 Inputs are raw APRS-IS text, one packet per line. For an honest ratio use `--holdout 0.3 --test-out test.txt`
 and run the host test on `test.txt` (the shipped table is trained on everything).
+
+## Host test for primed frames
+
+    c++ -std=c++17 -O2 -I lib/AprsCompress/src tools/aprs_compress/test_primed_host.cpp \
+        lib/AprsCompress/src/AprsCompress.cpp lib/AprsCompress/src/AprsCompressModel.cpp \
+        lib/AprsCompress/src/AprsCompressStore.cpp -o test_primed_host
+    ./test_primed_host ../lora-aprs-ideas/test/vectors_primed_v1.txt
+
+Checks the codec against the reference vectors (103 frames, byte for byte, and that a wrong reference is
+rejected), then simulates a sender and a receiver with a lost full frame and with a lost primed frame.
 
 ## Host test (no hardware needed)
 

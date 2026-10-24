@@ -22,8 +22,13 @@ namespace {
     // Probability model for the next byte, given the bytes before it in this packet.
     // Blends orders 3..0 (PPM method C escape weights) in 32.32 fixed point, then adds a
     // uniform floor of 1 so every byte value stays encodable. Fills freq[256]; returns the total.
-    uint32_t buildFreq(const uint8_t* hist, size_t pos, uint16_t* freq) {
-        uint32_t pr[256];
+    // If ref is not null the model is primed: for each order, every position of the reference text
+    // whose preceding k bytes equal the current context adds PRIME_WEIGHT to the count of the byte
+    // that followed it, on top of the stored table's count. With ref == null it is the plain model.
+    // The work arrays are static (single-threaded use) to keep the stack small on the ESP32.
+    uint32_t buildFreq(const uint8_t* hist, size_t pos, uint16_t* freq, const uint8_t* ref, size_t refLen) {
+        static uint32_t pr[256];
+        static uint32_t cnt[256];
         for (int s = 0; s < 256; s++) pr[s] = 0;
         uint64_t rem = 0xFFFFFFFFull;
         int maxK = pos < AprsCompressModel::ORDER ? (int)pos : (int)AprsCompressModel::ORDER;
@@ -31,17 +36,26 @@ namespace {
             uint32_t key = 0;
             for (int j = k; j >= 1; j--) key = (key << 8) | hist[pos - j];
             const AprsCompressModel::OrderTable& t = AprsCompressModel::ORDERS[k];
+            for (int s = 0; s < 256; s++) cnt[s] = 0;
             int c = findContext(t, key);
-            if (c < 0) continue;
-            uint32_t from = t.offsets[c], to = t.offsets[c + 1];
-            uint32_t u = to - from;
-            uint32_t n = 0;
-            for (uint32_t i = from; i < to; i++) n += AprsCompressModel::COUNTS[i];
-            uint32_t denom = n + u;
-            for (uint32_t i = from; i < to; i++) {
-                uint32_t add = (uint32_t)((rem * AprsCompressModel::COUNTS[i]) / denom);
-                pr[AprsCompressModel::SYMBOLS[i]] += add;
+            if (c >= 0) {
+                uint32_t from = t.offsets[c], to = t.offsets[c + 1];
+                for (uint32_t i = from; i < to; i++) cnt[AprsCompressModel::SYMBOLS[i]] += AprsCompressModel::COUNTS[i];
             }
+            if (ref != nullptr) {
+                for (size_t r = (size_t)k; r < refLen; r++) {
+                    bool match = true;
+                    for (int j = 0; j < k; j++)
+                        if (ref[r - (size_t)k + (size_t)j] != hist[pos - (size_t)k + (size_t)j]) { match = false; break; }
+                    if (match) cnt[ref[r]] += AprsCompress::PRIME_WEIGHT;
+                }
+            }
+            uint32_t u = 0, n = 0;
+            for (int s = 0; s < 256; s++) if (cnt[s]) { u++; n += cnt[s]; }
+            if (u == 0) continue;
+            uint32_t denom = n + u;
+            for (int s = 0; s < 256; s++)
+                if (cnt[s]) pr[s] += (uint32_t)((rem * cnt[s]) / denom);
             rem = (rem * u) / denom;
         }
         uint32_t floorShare = (uint32_t)(rem >> 8);
@@ -125,7 +139,7 @@ namespace AprsCompress {
         e.init(frame + 4, frameCap - 4);
         uint16_t freq[256];
         for (size_t i = 0; i < textLen; i++) {
-            uint32_t total = buildFreq(text, i, freq);
+            uint32_t total = buildFreq(text, i, freq, nullptr, 0);
             uint32_t cum = 0;
             for (int s = 0; s < text[i]; s++) cum += freq[s];
             e.encode(cum, freq[text[i]], total);
@@ -148,13 +162,88 @@ namespace AprsCompress {
         d.init(frame + 4, frameLen - 4);
         uint16_t freq[256];
         for (size_t i = 0; i < textLen; i++) {
-            uint32_t total = buildFreq(text, i, freq);
+            uint32_t total = buildFreq(text, i, freq, nullptr, 0);
             uint32_t v = d.target(total);
             uint32_t cum = 0; int s = 0;
             while (s < 255 && cum + freq[s] <= v) { cum += freq[s]; s++; }
             d.consume(cum, freq[s]);
             text[i] = (uint8_t)s;
         }
+        return textLen;
+    }
+
+    // ---- primed frames ----
+
+    uint8_t crc8(const uint8_t* p, size_t n) {
+        uint8_t c = 0;
+        for (size_t i = 0; i < n; i++) {
+            c ^= p[i];
+            for (int b = 0; b < 8; b++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x07) : (uint8_t)(c << 1);
+        }
+        return c;
+    }
+
+    uint8_t stationId(const uint8_t* text, size_t len) {
+        size_t n = 0;
+        while (n < len && text[n] != '>') n++;
+        return crc8(text, n);
+    }
+
+    bool isPrimedHeader(const uint8_t* f, size_t len) {
+        return len >= 6 && f[0] == HEADER_0 && f[1] == HEADER_1 &&
+               f[2] == (uint8_t)(VERSION_FLAG | PRIMED_FLAG | AprsCompressModel::VERSION);
+    }
+
+    bool primedHeader(const uint8_t* f, size_t len, uint8_t& id, uint8_t& refCheck) {
+        if (!isPrimedHeader(f, len)) return false;
+        id = f[3]; refCheck = f[4];
+        return true;
+    }
+
+    size_t encodePrimed(const uint8_t* ref, size_t refLen, const uint8_t* text, size_t textLen,
+                        uint8_t* frame, size_t frameCap) {
+        if (ref == nullptr || refLen == 0 || refLen > MAX_TEXT) return 0;
+        if (textLen == 0 || textLen > MAX_TEXT || frameCap < 7) return 0;
+        Encoder e;
+        e.init(frame + 6, frameCap - 6);
+        uint16_t freq[256];
+        for (size_t i = 0; i < textLen; i++) {
+            uint32_t total = buildFreq(text, i, freq, ref, refLen);
+            uint32_t cum = 0;
+            for (int s = 0; s < text[i]; s++) cum += freq[s];
+            e.encode(cum, freq[text[i]], total);
+        }
+        e.finish();
+        if (e.overflow) return 0;
+        size_t frameLen = 6 + e.n;
+        if (frameLen >= 3 + textLen) return 0;
+        frame[0] = HEADER_0; frame[1] = HEADER_1;
+        frame[2] = VERSION_FLAG | PRIMED_FLAG | AprsCompressModel::VERSION;
+        frame[3] = stationId(text, textLen);
+        frame[4] = crc8(ref, refLen);
+        frame[5] = (uint8_t)textLen;
+        return frameLen;
+    }
+
+    size_t decodePrimed(const uint8_t* ref, size_t refLen, const uint8_t* frame, size_t frameLen,
+                        uint8_t* text, size_t textCap) {
+        if (ref == nullptr || refLen == 0 || refLen > MAX_TEXT) return 0;
+        if (!isPrimedHeader(frame, frameLen)) return 0;
+        if (frame[4] != crc8(ref, refLen)) return 0;                // wrong reference
+        size_t textLen = frame[5];
+        if (textLen == 0 || textLen > textCap) return 0;
+        Decoder d;
+        d.init(frame + 6, frameLen - 6);
+        uint16_t freq[256];
+        for (size_t i = 0; i < textLen; i++) {
+            uint32_t total = buildFreq(text, i, freq, ref, refLen);
+            uint32_t v = d.target(total);
+            uint32_t cum = 0; int s = 0;
+            while (s < 255 && cum + freq[s] <= v) { cum += freq[s]; s++; }
+            d.consume(cum, freq[s]);
+            text[i] = (uint8_t)s;
+        }
+        if (stationId(text, textLen) != frame[3]) return 0;         // decoded to the wrong station
         return textLen;
     }
 }

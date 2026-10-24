@@ -89,6 +89,7 @@ public:
     int     power;
     bool    cadActive;
     bool    compressTx;     // experimental: send order-3 compressed frames (receivers always decode them)
+    int     compressFullEvery; // with compressTx: a full compressed frame at least every Nth packet per station; the rest are primed (1 = never primed)
 };
 
 class Display {

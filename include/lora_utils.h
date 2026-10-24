@@ -35,6 +35,7 @@ namespace LoRa_Utils {
     void    sleepRadio();
 
     // Used by the optional over-the-air self-test (APRS_PPM_SELFTEST):
+    bool    lastRxWasPrimed();              // the last received frame was a primed frame
     void    setForceCompress(int mode);     // -1 = follow lora.compressTx, 0 = plain, 1 = compressed
     bool    lastRxWasCompressed();
     size_t  lastRxAirBytes();

@@ -30,6 +30,7 @@
 #include "utils.h"
 #include "thermal_utils.h"
 #include "AprsCompress.h"
+#include "AprsCompressStore.h"
 
 
 extern Configuration    Config;
@@ -98,12 +99,19 @@ namespace LoRa_Utils {
     // Reads the frame the radio just received. A compressed frame (see AprsCompress) is expanded
     // back to "\x3c\xff\x01" + text, so everything after this sees the same packets as before.
     // Reads into a byte buffer: RadioLib's String overload stops at the first NUL byte.
+    //
+    // Two small stores of "last packet per station" support primed frames: rxStore holds what we have
+    // received (the reference for decoding), txStore what we have sent (the reference for encoding).
     static int  forceCompress  = -1;        // -1 = follow Config.loramodule.compressTx
     static bool rxCompressed   = false;
+    static bool rxPrimed       = false;
     static size_t rxAirBytes   = 0;
+    static AprsCompress::PacketStore rxStore;
+    static AprsCompress::PacketStore txStore;
 
     void setForceCompress(int mode) { forceCompress = mode; }
     bool lastRxWasCompressed()      { return rxCompressed; }
+    bool lastRxWasPrimed()          { return rxPrimed; }
     size_t lastRxAirBytes()         { return rxAirBytes; }
 
     static int16_t readFrame(String& packet) {
@@ -113,6 +121,7 @@ namespace LoRa_Utils {
         int16_t state = radio.readData(buf, len);
         rxAirBytes = len;
         rxCompressed = false;
+        rxPrimed = false;
         if (state == RADIOLIB_ERR_NONE || state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_LORA_HEADER_DAMAGED) {
             if (state == RADIOLIB_ERR_NONE && AprsCompress::isCompressedHeader(buf, len)) {
                 uint8_t text[AprsCompress::MAX_TEXT + 1];
@@ -121,26 +130,65 @@ namespace LoRa_Utils {
                 text[n] = 0;
                 packet = "\x3c\xff\x01" + String(reinterpret_cast<char*>(text));
                 rxCompressed = true;
+                rxStore.put(text, n, true);
                 Utils::println("Compressed frame: " + String(len) + " B on air, " + String(n + 3) + " B expanded");
+            } else if (state == RADIOLIB_ERR_NONE && AprsCompress::isPrimedHeader(buf, len)) {
+                uint8_t id = 0, check = 0;
+                AprsCompress::primedHeader(buf, len, id, check);
+                AprsCompress::PacketStore::Entry* ref = rxStore.findForFrame(id, check);
+                if (ref == nullptr) {
+                    Utils::println("Primed frame dropped: no matching reference (station id " + String(id) + ", check " + String(check) + ")");
+                    return RADIOLIB_ERR_UNKNOWN;
+                }
+                uint8_t text[AprsCompress::MAX_TEXT + 1];
+                size_t n = AprsCompress::decodePrimed(ref->text, ref->len, buf, len, text, AprsCompress::MAX_TEXT);
+                if (n == 0) {
+                    Utils::println("Primed frame dropped: did not decode");
+                    return RADIOLIB_ERR_UNKNOWN;
+                }
+                text[n] = 0;
+                packet = "\x3c\xff\x01" + String(reinterpret_cast<char*>(text));
+                rxCompressed = true;
+                rxPrimed = true;
+                rxStore.put(text, n, false);
+                Utils::println("Primed frame: " + String(len) + " B on air, " + String(n + 3) + " B expanded");
             } else {
                 buf[len] = 0;
+                if (state == RADIOLIB_ERR_NONE && len > 4 && buf[0] == 0x3C && buf[1] == 0xFF && buf[2] == 0x01)
+                    rxStore.put(buf + 3, len - 3, true);
                 packet = String(reinterpret_cast<char*>(buf));
             }
         }
         return state;
     }
 
-    // Sends one packet, compressed when enabled and when that makes the frame smaller.
+    // Sends one packet. When compression is on it sends the smallest of: a primed frame (only if we sent an
+    // earlier packet from the same source and fewer than compressFullEvery - 1 primed frames have gone since
+    // the last full one), a full compressed frame, or the plain frame.
     static int16_t transmitText(const String& text) {
         bool useCompression = (forceCompress < 0) ? Config.loramodule.compressTx : (forceCompress == 1);
-        if (useCompression) {
-            uint8_t frame[256];
-            size_t n = AprsCompress::encodeFrame(reinterpret_cast<const uint8_t*>(text.c_str()), text.length(), frame, sizeof(frame));
-            if (n > 0) {
-                Utils::println("Compressed frame: " + String(n) + " B instead of " + String(text.length() + 3) + " B");
-                return radio.transmit(frame, n);
+        const uint8_t* t = reinterpret_cast<const uint8_t*>(text.c_str());
+        size_t tl = text.length();
+        if (useCompression && tl > 0 && tl <= AprsCompress::MAX_TEXT) {
+            uint8_t full[256], primed[256];
+            size_t nf = AprsCompress::encodeFrame(t, tl, full, sizeof(full));
+            size_t np = 0;
+            int fullEvery = Config.loramodule.compressFullEvery;
+            AprsCompress::PacketStore::Entry* ref = txStore.findBySource(t, tl);
+            if (ref != nullptr && fullEvery > 1 && (int)ref->sinceFull + 1 < fullEvery)
+                np = AprsCompress::encodePrimed(ref->text, ref->len, t, tl, primed, sizeof(primed));
+            if (np > 0 && (nf == 0 || np < nf)) {
+                Utils::println("Primed frame: " + String(np) + " B instead of " + String(tl + 3) + " B");
+                txStore.put(t, tl, false);
+                return radio.transmit(primed, np);
+            }
+            txStore.put(t, tl, true);
+            if (nf > 0) {
+                Utils::println("Compressed frame: " + String(nf) + " B instead of " + String(tl + 3) + " B");
+                return radio.transmit(full, nf);
             }
         }
+        txStore.put(t, tl, true);               // receivers store plain packets too, so this stays in step
         return radio.transmit("\x3c\xff\x01" + text);
     }
 

@@ -53,7 +53,7 @@ namespace PPM_SelfTest {
         String text = packet.substring(3);                  // drop "<\xff\x01"
         int idx = AprsCompressSelfTest::check(text.c_str(), text.length());
         if (idx == -1) return false;                        // ordinary traffic
-        String how = LoRa_Utils::lastRxWasCompressed() ? "compressed" : "plain";
+        String how = LoRa_Utils::lastRxWasPrimed() ? "primed" : (LoRa_Utils::lastRxWasCompressed() ? "compressed" : "plain");
         if (idx >= 0) {
             okCount++;
             if (LoRa_Utils::lastRxWasCompressed()) compressedCount++; else plainCount++;
