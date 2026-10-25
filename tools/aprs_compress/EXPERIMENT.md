@@ -4,6 +4,9 @@ This is an **experimental branch**, not a pull request and not a request to chan
 that anyone interested can build it, try it on spare hardware, and tell us what they find. Nothing here changes
 how a stock station behaves unless you switch it on.
 
+It is shown as an idea that works, not as a request: **no pull request will be opened against the original project
+unless its maintainers say they would welcome one.**
+
 ## What it does
 
 A LoRa APRS packet is plain text, typically 50 to 80 bytes on the air. This branch adds an optional second frame

@@ -4,6 +4,9 @@ This is a branch of a **fork** of [richonguzman/LoRa_APRS_iGate](https://github.
 (the original project and its own README are there). It is an experiment, **not a pull request** and not part of
 that project. It adds an optional frame format that carries the same APRS text in fewer bytes.
 
+It is shown as an idea that works, not as a request: **no pull request will be opened against the original project
+unless its maintainer says a pull request would be welcome.**
+
 **Start here: [what this branch is for, what has been proven, what has not, and how to try it safely](https://github.com/radiohound/LoRa_APRS_iGate/blob/feature/order3-compression/tools/aprs_compress/EXPERIMENT.md)**
 
 ## In short
