@@ -1,5 +1,7 @@
 # APRS-PPM: order-3 context compression for LoRa APRS packets (experimental)
 
+New here? Start with [EXPERIMENT.md](EXPERIMENT.md): what this branch is for, what has been proven, what has not, and how to try it safely.
+
 Not a new idea: this is the prediction-by-partial-matching (PPM) family of text compressors
 (order-3 context, PPM "method C" escape weights) feeding a range coder, with the context
 statistics **trained ahead of time on real APRS packets and shipped as a fixed table**. A fixed
