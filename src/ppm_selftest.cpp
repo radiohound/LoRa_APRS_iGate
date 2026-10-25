@@ -26,6 +26,39 @@ namespace PPM_SelfTest {
     }
 
     void loop() {
+        #ifdef APRS_PPM_POSTEST
+            // Average-traffic check: 12 moving-station position packets with a 29-character comment, RFONLY path.
+            // All compressed (full/primed alternate via lora.compressFullEvery), none plain, 30 s apart, then silence.
+            static uint8_t pstep = 0;
+            if (!Config.loramodule.txActive || pstep >= 12) return;
+            uint32_t pnow = millis();
+            if (pnow < 10000UL + 30000UL * pstep) return;
+            String pcall = Config.tacticalCallsign == "" ? Config.callsign : Config.tacticalCallsign;
+            char ptext[160];
+            snprintf(ptext, sizeof(ptext), "%s>APLRG1,RFONLY:=34%05.2fN/118%05.2fW>LoRa APRS tracker, batt %d.%02dV",
+                     pcall.c_str(), 12.34 + 0.07 * pstep, 23.45 + 0.09 * pstep, 3, 92 - pstep);
+            Utils::println("POSTEST TX " + String(pstep + 1) + ": " + String(ptext));
+            LoRa_Utils::setForceCompress(1);
+            LoRa_Utils::sendNewPacket(String(ptext));
+            LoRa_Utils::setForceCompress(-1);
+            pstep++;
+        #endif
+        #ifdef APRS_PPM_ONESHOT
+            // Link check: 16 status packets, RFONLY path (no position, never gated), 30 s apart, then silence.
+            // 4 plain, 8 compressed (full/primed alternate via lora.compressFullEvery), 4 plain.
+            static uint8_t step = 0;
+            if (!Config.loramodule.txActive || step >= 16) return;
+            uint32_t now = millis();
+            if (now < 10000UL + 30000UL * step) return;
+            bool compressed = step >= 4 && step < 12;
+            String call = Config.tacticalCallsign == "" ? Config.callsign : Config.tacticalCallsign;
+            String text = call + ">APLRG1,RFONLY:>PPM link test " + String(step + 1);
+            Utils::println("ONESHOT TX " + String(step + 1) + (compressed ? " compressed" : " plain"));
+            LoRa_Utils::setForceCompress(compressed ? 1 : 0);
+            LoRa_Utils::sendNewPacket(text);
+            LoRa_Utils::setForceCompress(-1);
+            step++;
+        #endif
         #ifdef APRS_PPM_SELFTEST_TX
             if (!Config.loramodule.txActive) return;
             uint32_t now = millis();
