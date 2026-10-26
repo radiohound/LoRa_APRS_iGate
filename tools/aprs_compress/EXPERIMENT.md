@@ -32,6 +32,8 @@ Over the air, 24 October 2026, 433.775 MHz, SF12, BW 125 kHz, CR 4/5, about 2 mi
 | ESP32 (this firmware) to a Raspberry Pi running a Direwolf branch | 12 of 12 average-sized position packets decoded to exactly the text sent |
 | Same, size: 75-byte plain frame | full frame 38.0 B (49 % smaller), primed frame 13.8 B (82 % smaller), alternating 25.9 B (65 %) |
 | Direwolf transmit to this ESP32 firmware | 5 of 5 station beacons decoded; full 25 B, primed 8 B, against 57 B plain |
+| A LILYGO T-Deck tracker to this firmware | 6 of 6 beacons decoded exactly; full frames 42 % smaller, primed 63 to 68 % smaller than a 40 B plain beacon |
+| A full day, T-Deck to a Direwolf iGate about 2 miles away, a beacon every 15 minutes | 80 beacons expanded and gated of about 96 sent; 51 % fewer bytes on the air (1,736 B against 3,515 B); 6 primed frames dropped for lack of their full frame |
 
 The two programs share no code, so the second test is also a check that the written format is unambiguous.
 The primed numbers are best case, because the test beacon repeats exactly. A measurement of the real codec on
@@ -41,10 +43,10 @@ More detail and the test log: the `aprs-compression-proposal` repository (`docs/
 
 ## What has *not* been tested
 
-* Only one board: a TTGO LoRa32 V2.1 (ESP32 with an SX127x radio, 433 MHz). Other boards are untested.
+* Only one board for this firmware: a TTGO LoRa32 V2.1 (ESP32 with an SX127x radio, 433 MHz). Other boards are untested.
 * Only SF12 / 125 kHz. Other spreading factors are untested.
-* Weak signals and lost frames over the air (the code handles a lost reference frame by dropping the primed
-  frame that needs it; this has been checked in a simulation and a unit test, not on a marginal link).
+* A really weak signal. Lost frames have been seen on the air (in the full-day run a lost full frame cost the primed
+  frame after it, 6 times), but not on a marginal link.
 * What *other* firmware does with a compressed frame. This firmware ignores frames it does not know (it looks for
   exactly `0x3C 0xFF 0x01`), and the Direwolf LoRa driver, without the compression code, logs one as a frame it could not parse and carries on. We have
   not checked trackers, T-Decks or other iGates, so please do not enable transmit in a network where you cannot
