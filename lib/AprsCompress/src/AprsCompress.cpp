@@ -183,6 +183,18 @@ namespace AprsCompress {
         return c;
     }
 
+    // Text check: CRC-8, polynomial 0x1D (not 0x07), init 0, no reflection. A different polynomial from the reference
+    // check on purpose: a stale reference that collides on 0x07 decodes to text that differs from the real text by a
+    // pattern a 0x07 CRC cannot see.
+    uint8_t textCheck(const uint8_t* p, size_t n) {
+        uint8_t c = 0;
+        for (size_t i = 0; i < n; i++) {
+            c ^= p[i];
+            for (int b = 0; b < 8; b++) c = (c & 0x80) ? (uint8_t)((c << 1) ^ 0x1D) : (uint8_t)(c << 1);
+        }
+        return c;
+    }
+
     uint8_t stationId(const uint8_t* text, size_t len) {
         size_t n = 0;
         while (n < len && text[n] != '>') n++;
@@ -190,7 +202,7 @@ namespace AprsCompress {
     }
 
     bool isPrimedHeader(const uint8_t* f, size_t len) {
-        return len >= 6 && f[0] == HEADER_0 && f[1] == HEADER_1 &&
+        return len >= 7 && f[0] == HEADER_0 && f[1] == HEADER_1 &&
                f[2] == (uint8_t)(VERSION_FLAG | PRIMED_FLAG | AprsCompressModel::VERSION);
     }
 
@@ -203,9 +215,9 @@ namespace AprsCompress {
     size_t encodePrimed(const uint8_t* ref, size_t refLen, const uint8_t* text, size_t textLen,
                         uint8_t* frame, size_t frameCap) {
         if (ref == nullptr || refLen == 0 || refLen > MAX_TEXT) return 0;
-        if (textLen == 0 || textLen > MAX_TEXT || frameCap < 7) return 0;
+        if (textLen == 0 || textLen > MAX_TEXT || frameCap < 8) return 0;
         Encoder e;
-        e.init(frame + 6, frameCap - 6);
+        e.init(frame + 7, frameCap - 7);
         uint16_t freq[256];
         for (size_t i = 0; i < textLen; i++) {
             uint32_t total = buildFreq(text, i, freq, ref, refLen);
@@ -215,13 +227,14 @@ namespace AprsCompress {
         }
         e.finish();
         if (e.overflow) return 0;
-        size_t frameLen = 6 + e.n;
+        size_t frameLen = 7 + e.n;
         if (frameLen >= 3 + textLen) return 0;
         frame[0] = HEADER_0; frame[1] = HEADER_1;
         frame[2] = VERSION_FLAG | PRIMED_FLAG | AprsCompressModel::VERSION;
         frame[3] = stationId(text, textLen);
         frame[4] = crc8(ref, refLen);
-        frame[5] = (uint8_t)textLen;
+        frame[5] = textCheck(text, textLen);
+        frame[6] = (uint8_t)textLen;
         return frameLen;
     }
 
@@ -230,10 +243,10 @@ namespace AprsCompress {
         if (ref == nullptr || refLen == 0 || refLen > MAX_TEXT) return 0;
         if (!isPrimedHeader(frame, frameLen)) return 0;
         if (frame[4] != crc8(ref, refLen)) return 0;                // wrong reference
-        size_t textLen = frame[5];
+        size_t textLen = frame[6];
         if (textLen == 0 || textLen > textCap) return 0;
         Decoder d;
-        d.init(frame + 6, frameLen - 6);
+        d.init(frame + 7, frameLen - 7);
         uint16_t freq[256];
         for (size_t i = 0; i < textLen; i++) {
             uint32_t total = buildFreq(text, i, freq, ref, refLen);
@@ -244,6 +257,7 @@ namespace AprsCompress {
             text[i] = (uint8_t)s;
         }
         if (stationId(text, textLen) != frame[3]) return 0;         // decoded to the wrong station
+        if (textCheck(text, textLen) != frame[5]) return 0;         // wrong text: stale reference with the same check, or a cut frame
         return textLen;
     }
 }

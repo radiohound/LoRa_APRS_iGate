@@ -152,6 +152,10 @@ namespace LoRa_Utils {
                 rxPrimed = true;
                 rxStore.put(text, n, false);
                 Utils::println("Primed frame: " + String(len) + " B on air, " + String(n + 3) + " B expanded");
+            } else if (len >= 3 && buf[0] == 0x3C && buf[1] == 0xFF && buf[2] != 0x01) {
+                // A 3C FF frame of a type we do not know (another model version, another format): drop it, never show it as text.
+                Utils::println("Frame with an unknown 3C FF type dropped: " + String(buf[2], HEX));
+                return RADIOLIB_ERR_UNKNOWN;
             } else {
                 buf[len] = 0;
                 if (state == RADIOLIB_ERR_NONE && len > 4 && buf[0] == 0x3C && buf[1] == 0xFF && buf[2] == 0x01)

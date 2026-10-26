@@ -1,5 +1,15 @@
 # Experimental branch: compressed LoRa APRS frames (APRS-PPM)
 
+> **Breaking change, 26 October 2026: upgrade if you built an earlier version.** After an independent tester showed that a
+> primed frame (`3C FF C1`) could decode to the wrong text when a receiver held a stale reference, the primed header gained
+> a check byte over the whole text (now 7 bytes, was 6). **Builds from before this change are not compatible with builds
+> from after it for primed frames:** each side almost always drops the other's primed frames, and about 1 in 256 could decode
+> to the wrong text, the same weakness the new byte removes. Full frames (`3C FF 81`) and plain frames are unchanged and
+> still work between old and new. **Rebuild and reflash every device that uses this code, all together.** Receivers also
+> now drop any `3C FF` frame of a type they do not know, instead of passing it on as text. Primed frames are one byte
+> bigger, so primed savings are about 2 points lower than quoted before this change.
+> Details and the test results: [known issues](https://github.com/radiohound/aprs-compression-proposal/blob/main/docs/known-issues.md).
+
 This is a branch of a **fork** of [richonguzman/LoRa_APRS_iGate](https://github.com/richonguzman/LoRa_APRS_iGate)
 (the original project and its own README are there). It is an experiment, **not a pull request** and not part of
 that project. It adds an optional frame format that carries the same APRS text in fewer bytes.

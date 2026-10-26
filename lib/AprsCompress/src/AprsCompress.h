@@ -39,12 +39,15 @@ namespace AprsCompress {
     size_t  decodeFrame(const uint8_t* frame, size_t frameLen, uint8_t* text, size_t textCap);
 
     // ---- Primed frames (spec 08 of the APRS-PPM proposal) ----
-    // On air: 0x3C 0xFF (0xC0 | modelVersion) <station id> <reference check> <length> <coded bytes>
+    // On air: 0x3C 0xFF (0xC0 | modelVersion) <station id> <reference check> <text check> <length> <coded bytes>
     //   station id      = CRC-8 of the source callsign (the text before the first '>')
     //   reference check = CRC-8 of the whole reference text
+    //   text check      = CRC-8 (polynomial 0x1D) of the whole original text, checked after decoding
+    // This 7-byte header replaces the 6-byte one of the first version (no text check). The two are not compatible.
     // The reference is the text of the same station's earlier packet; sender and receiver must hold
     // the same bytes or the frame is dropped. Same model tables as the full frame.
     uint8_t crc8(const uint8_t* p, size_t n);                   // polynomial 0x07, init 0, no reflection
+    uint8_t textCheck(const uint8_t* p, size_t n);              // polynomial 0x1D, init 0, no reflection
     uint8_t stationId(const uint8_t* text, size_t len);
     bool    isPrimedHeader(const uint8_t* frame, size_t len);
     // Reads the two header bytes a receiver uses to choose its reference. False if not a primed frame.
@@ -52,7 +55,7 @@ namespace AprsCompress {
     // Returns the frame length, or 0 if it does not fit or is not smaller than 3 + textLen.
     size_t  encodePrimed(const uint8_t* ref, size_t refLen, const uint8_t* text, size_t textLen,
                          uint8_t* frame, size_t frameCap);
-    // Returns the text length, or 0 (not primed, wrong reference, bad data).
+    // Returns the text length, or 0 (not primed, wrong reference, wrong text, bad data).
     size_t  decodePrimed(const uint8_t* ref, size_t refLen, const uint8_t* frame, size_t frameLen,
                          uint8_t* text, size_t textCap);
 }
