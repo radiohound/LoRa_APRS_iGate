@@ -12,7 +12,7 @@ The same format runs on the T-Deck tracker (branch `hybrid` of the tracker fork)
 
 On the web page, **Digipeating**, last row: **Tx frame format**, with the same two choices as on the T-Deck:
 
-* **Text (standard)**: what the station sends today (or the older compressed text, if `compressTx` is on in the config file).
+* **Text (standard)**: what the station sends today.
 * **Hybrid RXT Compression (LACF, test only)**: every frame the station sends, beacons, digipeated packets and the rest, goes out as an LACF frame
   when the packet can be encoded, otherwise as text. Other firmware ignores these frames.
 
@@ -31,16 +31,18 @@ A path element shaped like `WIDEn-N` must follow the APRS rule (n 1 to 7, N 1 to
 
 ## Cost
 
-The published build for the TTGO LoRa32 V2.1 (commit 88964d7) is 1,804,336 bytes of the 1,966,080-byte app slot (91.8%). Ricardo's `main` is 1,602,737 bytes (81.5%),
+The published build for the TTGO LoRa32 V2.1 (commit 88964d7, which still carried the earlier whole-text codec) is 1,804,336 bytes of the 1,966,080-byte app slot (91.8%). Ricardo's `main` is 1,602,737 bytes (81.5%),
 so LACF, the MQTT feed and the other additions of this branch cost about 330 KB. That fits because `btStop()` was removed from `wifi_utils.cpp`: nothing here uses
 Bluetooth, and the call alone makes the Arduino core link about 128 KB of Bluetooth support (found by F4MLV; measured again on 1 November 2026 on `main`: 1,602,737
 bytes (81.5%) became 1,474,561 (75.0%), and RAM 17.2% became 16.0%). The frame code runs in a task of its own with a 16 KB stack, created at the first use.
+
+The earlier whole-text codec (`3C FF 81` and `3C FF C1`) has since been removed, because no station sends it any more. Built from the commit that removes it, the LoRa32 build is 1,664,817 bytes (84.7% of the slot; was 1,797,625, 91.4%) and uses 53,860 bytes of RAM (was 68,588); the ESP32-C3 build is 1,654,510 bytes (84.2%; was 1,782,746) and 46,468 bytes of RAM (was 61,252). That build is not yet the published firmware.
 
 ## Tests
 
 Host tests (no board needed):
 
-* `sh test/lacf/run.sh`: the wrapper and the frame code against 40 spec vectors, 35 frames with RXT tuples, 28 rejection vectors and the WIDE rule (277 checks).
+* `sh test/lacf/run.sh`: the wrapper and the frame code against 40 spec vectors, 35 frames with RXT tuples, 28 rejection vectors and the WIDE rule (304 checks).
 * `sh test/events/run.sh`: the collector event lines, including the RFONLY/NOGATE privacy rule.
 * `sh test/configstore/run.sh`: safe saving of the settings file (123 checks).
 * `sh test/mqttdefaults/run.sh`: the pre-filled collector settings (10 cases).
@@ -57,3 +59,4 @@ and keeps the settings. LACF is still an experimental draft in early development
 
 * No RXT: the iGate does not add its own measurement when it digipeats an LACF frame, and an RXT block it receives is counted and not carried on.
 * Frames of kind 0 and 1 (plain text frames of the earlier drafts) are not handled; they are dropped.
+* The earlier whole-text compressed frames (`3C FF 81`, `3C FF C1`) are no longer decoded or sent. They are dropped like any other `3C FF` frame of an unknown type, and the collector counts them as `parse_failed`. The `compressTx` and `compressFullEvery` settings are still read and written so that settings files do not change, but they do nothing.

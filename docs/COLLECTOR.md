@@ -22,7 +22,7 @@ Cost: a few KB of flash for the event code (about 91% of the slot on ttgo-lora32
 
 ## What is sent
 
-* **rx** for every frame heard: RSSI, SNR, frequency error, frame class (`plain`, `ppm_full`, `ppm_primed`, `hybrid`), bytes on air and as plain text, and the decoded packet.
+* **rx** for every frame heard: RSSI, SNR, frequency error, frame class (`plain`, `hybrid`; `ppm_full` and `ppm_primed` are the earlier whole-text formats, which this firmware no longer decodes: a frame of that kind is still named by its header but arrives as a `parse_failed` outcome with no packet), bytes on air and as plain text, and the decoded packet.
 * **rx with an outcome** for a frame that was heard but not decoded, with `packet: null`: `crc_error` (`crc_valid` false, at most 30 a minute; the damaged bytes themselves are **not** sent, because a private packet whose RFONLY or NOGATE got damaged could no longer be recognised and would be published readable),
   `dropped_no_reference` (a primed frame with no earlier full one) or `parse_failed`. The same shape as Dire Wolf's `LORAEVENTS`.
 * **tx** for every frame sent: class, bytes on air, whether the radio reported success.
