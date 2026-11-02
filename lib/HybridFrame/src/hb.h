@@ -9,6 +9,8 @@
 extern "C" {
 #endif
 #define HB_MAX_TUPLES 7
+#define HB_SPEC_VERSION "2.0.0"   /* semantic version of spec 11: MAJOR = wire format version (low six bits of V), MINOR = backward-compatible addition, PATCH = wording only */
+#define HB_WIRE_VERSION 2
 typedef struct { int n; uint8_t idx[HB_MAX_TUPLES]; uint8_t t[HB_MAX_TUPLES][4]; } hb_rxt_t;     /* tuples in ascending path-element index */
 typedef struct { int kind, cc, ver, npath; size_t frame_len, content_len, payload_len, front_len, path_start, content_start; hb_rxt_t rxt; int has_rxt; } hb_info_t;
 

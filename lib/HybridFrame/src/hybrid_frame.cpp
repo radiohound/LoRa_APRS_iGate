@@ -127,7 +127,7 @@ namespace HYBRID_FRAME {
     }
 
     bool isHybrid(const uint8_t* data, size_t size) {
-        return size >= 5 && data[0] == 0x3C && data[1] == 0xFF && data[2] == 0x02 && (data[3] & 3) >= 2;
+        return size >= 5 && data[0] == 0x3C && data[1] == 0xFF && data[2] == 0x02;                        // all four kinds: LACF (2, 3) and raw (0, 1); the receiver checks the rest
     }
 
     bool pathOk(const std::string& tnc2) {

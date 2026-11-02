@@ -1,4 +1,4 @@
-// LACF, the LoRa APRS Compact Frame (spec 11 of the APRS-PPM proposal): the native frame 3C FF 02 with kind 2 or 3 and a PPM-coded content field.
+// LACF, the LoRa APRS Compact Frame (spec 11 of the APRS-PPM proposal): the native frame 3C FF 02: raw (kinds 0, 1) or PPM-coded (kinds 2, 3) content, each with a CRC-16.
 // The frame code (hb.c and the two table files) is the C reference of that spec, unchanged. A relay (relay() below) keeps the tuples of the earlier hops
 // and adds its own; a frame that is not relayed carries none.
 #ifndef HYBRID_FRAME_H_
@@ -11,7 +11,7 @@
 
 namespace HYBRID_FRAME {
 
-    // True for 3C FF 02 with information kind 2 or 3.
+    // True for 3C FF 02 (any kind).
     bool isHybrid(const uint8_t* data, size_t size);
 
     // TNC2 packet ("SRC>DST,PATH:info", no 3C FF 01 prefix) to an LACF frame. False when the packet cannot be encoded (the caller then sends it as text)

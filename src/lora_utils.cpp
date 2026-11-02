@@ -123,7 +123,7 @@ namespace LoRa_Utils {
         rxHybrid = false;
         if (state == RADIOLIB_ERR_NONE || state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_LORA_HEADER_DAMAGED) {
             if (state == RADIOLIB_ERR_NONE && HYBRID_FRAME::isHybrid(buf, len)) {
-                // LACF, the LoRa APRS Compact Frame (3C FF 02, kind 2 or 3): expanded back to "\x3c\xff\x01" + text.
+                // LACF, the LoRa APRS Compact Frame (3C FF 02, raw or LACF content, any kind): expanded back to "\x3c\xff\x01" + text.
                 // An RXT block it may carry is read here only to be counted: a relay of this frame is built from the received bytes (buildRelayFrame), which keep the tuples.
                 std::string tnc2;
                 int tuples = 0;

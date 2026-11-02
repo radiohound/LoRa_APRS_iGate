@@ -47,7 +47,7 @@ int main() {
     const char* good[] = { "N0CALL>APLRG1,WIDE1-1:>x", "N0CALL>APLRG1,WIDE2:>x", "N0CALL>APLRG1,WIDE3-3*:>x", "N0CALL>APLRG1:>x" };
     for (const char* p : good) { std::vector<uint8_t> f; EXPECT("good path encodes", HYBRID_FRAME::encode(p, f)); EXPECT("good path", HYBRID_FRAME::pathOk(p)); }
     uint8_t k1[6] = { 0x3C, 0xFF, 0x02, 0x01, 0, 0 }, k3[6] = { 0x3C, 0xFF, 0x02, 0x03, 0, 0 }, t[6] = { 0x3C, 0xFF, 0x01, 0x02, 0, 0 };
-    EXPECT("kind 1 is not LACF", !HYBRID_FRAME::isHybrid(k1, 6));
+    EXPECT("kind 1 (raw with a position block) is LACF-family", HYBRID_FRAME::isHybrid(k1, 6));
     EXPECT("kind 3 is LACF", HYBRID_FRAME::isHybrid(k3, 6));
     EXPECT("plain is not LACF", !HYBRID_FRAME::isHybrid(t, 6));
     // the relay (spec 11, "Relay"): the received frame with the new path, the earlier hops' tuples kept, the relay's own tuple added
