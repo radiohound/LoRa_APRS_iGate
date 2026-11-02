@@ -11,9 +11,6 @@
 
 namespace HYBRID_FRAME {
 
-    // The LACF version of this code (spec 11, "MAJOR.MINOR.PATCH"; MAJOR is the protocol version carried in every frame), for example "2.0.0".
-    const char* version();
-
     // True for 3C FF 02 (any kind).
     bool isHybrid(const uint8_t* data, size_t size);
 

@@ -24,6 +24,4 @@ assert bad == [("crc_error", 0, "3cff022200ab", -3600.0, "hybrid")], bad
 assert db.execute("select count(*) from receptions where outcome='dropped_no_reference' and class='ppm_primed'").fetchone()[0] == 1
 nf = db.execute("select nf_avg_dbm, nf_min_dbm, nf_max_dbm, nf_samples from status where nf_samples is not null").fetchall()
 assert nf == [(-107.3, -111, -98, 59)], nf
-lacf = db.execute("select sequence, lacf from status order by sequence").fetchall()
-assert lacf == [(5, "2.0.0"), (8, None)], lacf         # the first status line carries the LACF version, the second (an older build) does not
 print("ok")
