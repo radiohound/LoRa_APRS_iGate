@@ -29,8 +29,6 @@
 #include "display.h"
 #include "utils.h"
 #include "thermal_utils.h"
-#include "AprsCompress.h"
-#include "AprsCompressStore.h"
 #include "hybrid_frame.h"
 #include "events_format.h"
 #include "mqtt_utils.h"
@@ -99,27 +97,17 @@ namespace LoRa_Utils {
         return out;
     }
 
-    // Reads the frame the radio just received. A compressed frame (see AprsCompress) is expanded
-    // back to "\x3c\xff\x01" + text, so everything after this sees the same packets as before.
+    // Reads the frame the radio just received. An LACF frame is expanded back to "\x3c\xff\x01" + text, so
+    // everything after this sees the same packets as before. The earlier whole-text compressed formats
+    // (3C FF 81 / 3C FF C1) are no longer read or sent.
     // Reads into a byte buffer: RadioLib's String overload stops at the first NUL byte.
-    //
-    // Two small stores of "last packet per station" support primed frames: rxStore holds what we have
-    // received (the reference for decoding), txStore what we have sent (the reference for encoding).
-    static int  forceCompress  = -1;        // -1 = follow Config.loramodule.compressTx
-    static bool rxCompressed   = false;
-    static bool rxPrimed       = false;
     static bool rxHybrid       = false;
     static size_t rxAirBytes   = 0;
     static uint8_t  badBuf[256];                // the bytes of the last frame that was heard but not decoded
     static size_t   badLen     = 0;
     static int      undecoded  = -1;            // EventsFormat::Outcome of that frame, -1 = none
-    static AprsCompress::PacketStore rxStore;
-    static AprsCompress::PacketStore txStore;
 
-    void setForceCompress(int mode) { forceCompress = mode; }
-    bool lastRxWasCompressed()      { return rxCompressed; }
     bool lastRxWasHybrid()          { return rxHybrid; }
-    bool lastRxWasPrimed()          { return rxPrimed; }
     size_t lastRxAirBytes()         { return rxAirBytes; }
 
     static int16_t readFrame(String& packet) {
@@ -130,43 +118,10 @@ namespace LoRa_Utils {
         rxAirBytes = len;
         undecoded = -1;
         if (state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_NONE) { memcpy(badBuf, buf, len); badLen = len; }
-        rxCompressed = false;
-        rxPrimed = false;
         rxHybrid = false;
         if (state == RADIOLIB_ERR_NONE || state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_LORA_HEADER_DAMAGED) {
-            if (state == RADIOLIB_ERR_NONE && AprsCompress::isCompressedHeader(buf, len)) {
-                uint8_t text[AprsCompress::MAX_TEXT + 1];
-                size_t n = AprsCompress::decodeFrame(buf, len, text, AprsCompress::MAX_TEXT);
-                if (n == 0) { undecoded = EventsFormat::PARSE_FAILED; return RADIOLIB_ERR_UNKNOWN; }
-                text[n] = 0;
-                packet = "\x3c\xff\x01" + String(reinterpret_cast<char*>(text));
-                rxCompressed = true;
-                rxStore.put(text, n, true);
-                Utils::println("Compressed frame: " + String(len) + " B on air, " + String(n + 3) + " B expanded");
-            } else if (state == RADIOLIB_ERR_NONE && AprsCompress::isPrimedHeader(buf, len)) {
-                uint8_t id = 0, check = 0;
-                AprsCompress::primedHeader(buf, len, id, check);
-                AprsCompress::PacketStore::Entry* ref = rxStore.findForFrame(id, check);
-                if (ref == nullptr) {
-                    Utils::println("Primed frame dropped: no matching reference (station id " + String(id) + ", check " + String(check) + ")");
-                    undecoded = EventsFormat::DROPPED_NO_REFERENCE;
-                    return RADIOLIB_ERR_UNKNOWN;
-                }
-                uint8_t text[AprsCompress::MAX_TEXT + 1];
-                size_t n = AprsCompress::decodePrimed(ref->text, ref->len, buf, len, text, AprsCompress::MAX_TEXT);
-                if (n == 0) {
-                    Utils::println("Primed frame dropped: did not decode");
-                    undecoded = EventsFormat::PARSE_FAILED;
-                    return RADIOLIB_ERR_UNKNOWN;
-                }
-                text[n] = 0;
-                packet = "\x3c\xff\x01" + String(reinterpret_cast<char*>(text));
-                rxCompressed = true;
-                rxPrimed = true;
-                rxStore.put(text, n, false);
-                Utils::println("Primed frame: " + String(len) + " B on air, " + String(n + 3) + " B expanded");
-            } else if (state == RADIOLIB_ERR_NONE && HYBRID_FRAME::isHybrid(buf, len)) {
-                // LACF, the LoRa APRS Compact Frame (3C FF 02, kind 2 or 3): expanded back to "\x3c\xff\x01" + text like the other compressed frames.
+            if (state == RADIOLIB_ERR_NONE && HYBRID_FRAME::isHybrid(buf, len)) {
+                // LACF, the LoRa APRS Compact Frame (3C FF 02, kind 2 or 3): expanded back to "\x3c\xff\x01" + text.
                 // An RXT block it may carry is counted and dropped: this firmware has no RXT.
                 std::string tnc2;
                 int tuples = 0;
@@ -185,17 +140,13 @@ namespace LoRa_Utils {
                 return RADIOLIB_ERR_UNKNOWN;
             } else {
                 buf[len] = 0;
-                if (state == RADIOLIB_ERR_NONE && len > 4 && buf[0] == 0x3C && buf[1] == 0xFF && buf[2] == 0x01)
-                    rxStore.put(buf + 3, len - 3, true);
                 packet = String(reinterpret_cast<char*>(buf));
             }
         }
         return state;
     }
 
-    // Sends one packet. When compression is on it sends the smallest of: a primed frame (only if we sent an
-    // earlier packet from the same source and fewer than compressFullEvery - 1 primed frames have gone since
-    // the last full one), a full compressed frame, or the plain frame.
+    // Sends one packet: as an LACF frame when the Tx frame format is Hybrid RXT Compression, otherwise as plain text.
     static int  txFrameClass = EventsFormat::PLAIN;     // what the last transmitText sent, for the collector's tx event
     static int  txAirBytes   = 0;
 
@@ -212,33 +163,6 @@ namespace LoRa_Utils {
             }
             Utils::println("LACF: sent as text, the packet cannot be encoded");
         }
-        bool useCompression = (forceCompress < 0) ? Config.loramodule.compressTx : (forceCompress == 1);
-        const uint8_t* t = reinterpret_cast<const uint8_t*>(text.c_str());
-        size_t tl = text.length();
-        if (useCompression && tl > 0 && tl <= AprsCompress::MAX_TEXT) {
-            uint8_t full[256], primed[256];
-            size_t nf = AprsCompress::encodeFrame(t, tl, full, sizeof(full));
-            size_t np = 0;
-            int fullEvery = Config.loramodule.compressFullEvery;
-            AprsCompress::PacketStore::Entry* ref = txStore.findBySource(t, tl);
-            if (ref != nullptr && fullEvery > 1 && (int)ref->sinceFull + 1 < fullEvery)
-                np = AprsCompress::encodePrimed(ref->text, ref->len, t, tl, primed, sizeof(primed));
-            if (np > 0 && (nf == 0 || np < nf)) {
-                Utils::println("Primed frame: " + String(np) + " B instead of " + String(tl + 3) + " B");
-                txStore.put(t, tl, false);
-                txFrameClass = EventsFormat::PPM_PRIMED;
-                txAirBytes   = np;
-                return radio.transmit(primed, np);
-            }
-            txStore.put(t, tl, true);
-            if (nf > 0) {
-                Utils::println("Compressed frame: " + String(nf) + " B instead of " + String(tl + 3) + " B");
-                txFrameClass = EventsFormat::PPM_FULL;
-                txAirBytes   = nf;
-                return radio.transmit(full, nf);
-            }
-        }
-        txStore.put(t, tl, true);               // receivers store plain packets too, so this stays in step
         return radio.transmit("\x3c\xff\x01" + text);
     }
 

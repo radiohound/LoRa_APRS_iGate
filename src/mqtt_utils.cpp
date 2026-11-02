@@ -95,7 +95,6 @@ namespace MQTT_Utils {
 
     static int rxFrameClass() {
         if (LoRa_Utils::lastRxWasHybrid())      return EventsFormat::HYBRID;
-        if (LoRa_Utils::lastRxWasCompressed())  return LoRa_Utils::lastRxWasPrimed() ? EventsFormat::PPM_PRIMED : EventsFormat::PPM_FULL;
         return EventsFormat::PLAIN;
     }
 
