@@ -23,6 +23,7 @@
 #include "configuration.h"
 #include "station_utils.h"
 #include "events_format.h"
+#include "hybrid_frame.h"
 #include "lora_utils.h"
 #include "mqtt_utils.h"
 
@@ -143,7 +144,7 @@ namespace MQTT_Utils {
         EventsFormat::Noise noise = {};
         LoRa_Utils::takeNoiseFloor(noise);
         counts.loopMaxMs = (long)reportedLoopMaxMs;
-        publishEvent("status", EventsFormat::status(h, (long)(millis() / 1000), counts, noise));
+        publishEvent("status", EventsFormat::status(h, (long)(millis() / 1000), counts, noise, HYBRID_FRAME::version()));
     }
 
     void sendToMqtt(const String& packet) {

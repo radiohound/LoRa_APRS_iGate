@@ -54,7 +54,8 @@ namespace EventsFormat {
     std::string rxUndecoded(const Head& h, const Radio& r, int rssiDbm, float snrDb, int freqErrorHz,
                             int frameClass, int outcome, int airBytes, const uint8_t* raw, size_t rawLen);
     std::string tx(const Head& h, const Radio& r, int frameClass, int airBytes, bool ok);
-    std::string status(const Head& h, long uptimeS, const Counts& c, const Noise& n);
+    // lacf: the LACF version this build speaks (spec 11, "MAJOR.MINOR.PATCH"; MAJOR is the protocol version), or nullptr to leave the field out.
+    std::string status(const Head& h, long uptimeS, const Counts& c, const Noise& n, const char* lacf = nullptr);
 
 }
 

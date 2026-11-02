@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
     printf("%s\n", EventsFormat::tx(h, r, EventsFormat::HYBRID, 58, true).c_str());
     h.sequence = 5;
     EventsFormat::Noise n = { 59, -107.3, -111, -98 };
-    printf("%s\n", EventsFormat::status(h, 3600, c, n).c_str());
+    printf("%s\n", EventsFormat::status(h, 3600, c, n, "2.0.0").c_str());
     h.sequence = 6;
     const uint8_t bad[] = { 0x3C, 0xFF, 0x02, 0x22, 0x00, 0xAB };
     printf("%s\n", EventsFormat::rxUndecoded(h, r, -118, -17.5f, -3600, EventsFormat::classify(bad, sizeof bad), EventsFormat::CRC_ERROR, sizeof bad, bad, sizeof bad).c_str());

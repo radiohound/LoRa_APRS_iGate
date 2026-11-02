@@ -223,12 +223,13 @@ namespace EventsFormat {
         return o;
     }
 
-    std::string status(const Head& h, long uptimeS, const Counts& c, const Noise& n) {
+    std::string status(const Head& h, long uptimeS, const Counts& c, const Noise& n, const char* lacf) {
         std::string o;
         putHead(o, "status", h);
         putf(o, ",\"uptime_s\":%ld,\"loop_max_ms\":%ld", uptimeS, c.loopMaxMs);
         if (n.samples > 0) putf(o, ",\"noise_floor\":{\"avg_dbm\":%.1f,\"min_dbm\":%d,\"max_dbm\":%d,\"samples\":%d}", n.avgDbm, n.minDbm, n.maxDbm, n.samples);
         else               o += ",\"noise_floor\":null";
+        if (lacf && *lacf) putf(o, ",\"lacf\":\"%s\"", lacf);          // a version number: digits and dots, nothing to escape
         o += ",\"received\":{";
         for (int i = 0; i < NCLASSES; i++) putf(o, "%s\"%s\":%ld", i ? "," : "", className(i), c.received[i]);
         putf(o, ",\"dropped_no_reference\":%ld,\"parse_failed\":%ld},\"crc_errors\":%ld}", c.droppedNoReference, c.parseFailed, c.crcErrors);

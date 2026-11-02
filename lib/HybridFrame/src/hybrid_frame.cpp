@@ -126,6 +126,10 @@ namespace HYBRID_FRAME {
 #endif
     }
 
+    const char* version() {
+        return HB_SPEC_VERSION;
+    }
+
     bool isHybrid(const uint8_t* data, size_t size) {
         return size >= 5 && data[0] == 0x3C && data[1] == 0xFF && data[2] == 0x02;                        // all four kinds: LACF (2, 3) and raw (0, 1); the receiver checks the rest
     }
