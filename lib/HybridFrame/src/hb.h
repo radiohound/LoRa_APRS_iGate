@@ -34,6 +34,14 @@ int hb_decode(const uint8_t *fr, size_t n, char *tnc2, size_t cap, hb_info_t *in
 /* Relay (spec 11 "Relay"): the frame must already be accepted by hb_decode. Rewrites the path (WIDE1-1 as first unused hop becomes relay_call*; WIDE2-2 becomes
  * relay_call*,WIDE2-1), copies the position block and the content field byte for byte, and appends the relay's tuple. Returns the new length, or 0. */
 size_t hb_relay(const uint8_t *fr, size_t n, const char *relay_call, const uint8_t tuple[4], uint8_t *out, size_t cap);
+
+/* The same relay with the new path chosen by the caller, for a digipeater with its own rules: new_tnc2 is the received packet with the path as the relay sends it (it
+ * holds relay_call + "*" as the element the relay used); source, destination and information field must be those of the received frame. Copies the source and the
+ * destination exactly as received, the position block and the content byte for byte, keeps the tuples of the earlier hops (each moves with its path element) and
+ * appends the relay's tuple at its element, unless the frame would then be longer than 255 bytes: it is then forwarded without the relay's tuple (the earlier tuples stay).
+ * Returns 0 if the frame must not be relayed: it holds a tuple on the relay's element or a later one, the element is not in the new path, or it does not fit even without
+ * the relay's tuple. */
+size_t hb_relay_to(const uint8_t *fr, size_t n, const char *new_tnc2, size_t new_len, const char *relay_call, const uint8_t tuple[4], uint8_t *out, size_t cap);
 #ifdef __cplusplus
 }
 #endif

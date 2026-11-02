@@ -21,13 +21,15 @@
 
 #include <Arduino.h>
 #include "events_format.h"
+#include "relay_frame.h"
 
 
 namespace LoRa_Utils {
 
     int     validPower(int requested);
     void    setup();
-    void    sendNewPacket(const String& newPacket);
+    void    sendNewPacket(const String& newPacket, const RelayFrame* relay = nullptr);   // relay: the LACF frame to send instead of newPacket as text (a relayed LACF frame)
+    bool    buildRelayFrame(const String& newPacket, RelayFrame& relay);               // the LACF frame of a relay of the last frame received (false: send newPacket the usual way)
     String  receivePacketFromSleep();
     String  receivePacket();
     void    changeFreqTx();

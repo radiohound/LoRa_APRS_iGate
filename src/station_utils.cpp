@@ -38,7 +38,9 @@ std::vector<LastHeardStation>   lastHeardObjects;
 struct OutputPacketBuffer {
     String      packet;
     bool        isBeacon;
-    OutputPacketBuffer(const String& p, bool b) : packet(p), isBeacon(b) {}
+    bool        hasRelay;
+    RelayFrame  relay;                      // the LACF frame to send for a relayed LACF frame (hasRelay)
+    OutputPacketBuffer(const String& p, bool b) : packet(p), isBeacon(b), hasRelay(false) {}
 };
 std::vector<OutputPacketBuffer> outputPacketBuffer;
 
@@ -194,7 +196,7 @@ namespace STATION_Utils {
         while (currentIndex < outputPacketBuffer.size()) {                  // this sends all packets from output buffer
             delay(3000);                                                    // and cleans buffer to avoid sending packets with time offset
             if (outputPacketBuffer[currentIndex].isBeacon) packetIsBeacon = true;
-            LoRa_Utils::sendNewPacket(outputPacketBuffer[currentIndex].packet);    // next time it wakes up
+            LoRa_Utils::sendNewPacket(outputPacketBuffer[currentIndex].packet, outputPacketBuffer[currentIndex].hasRelay ? &outputPacketBuffer[currentIndex].relay : nullptr);    // next time it wakes up
             if (outputPacketBuffer[currentIndex].isBeacon) packetIsBeacon = false;
             currentIndex++;
         }
@@ -212,14 +214,14 @@ namespace STATION_Utils {
     void processOutputPacketBuffer() {
         if (outputPacketBuffer.size() > 0) {
             if (outputPacketBuffer[0].isBeacon) packetIsBeacon = true;
-            LoRa_Utils::sendNewPacket(outputPacketBuffer[0].packet);
+            LoRa_Utils::sendNewPacket(outputPacketBuffer[0].packet, outputPacketBuffer[0].hasRelay ? &outputPacketBuffer[0].relay : nullptr);
             if (outputPacketBuffer[0].isBeacon) packetIsBeacon = false;
             outputPacketBuffer.erase(outputPacketBuffer.begin());
         }
         if (shouldSleepLowVoltage) {
             while (outputPacketBuffer.size() > 0) {
                 if (outputPacketBuffer[0].isBeacon) packetIsBeacon = true;
-                LoRa_Utils::sendNewPacket(outputPacketBuffer[0].packet);
+                LoRa_Utils::sendNewPacket(outputPacketBuffer[0].packet, outputPacketBuffer[0].hasRelay ? &outputPacketBuffer[0].relay : nullptr);
                 if (outputPacketBuffer[0].isBeacon) packetIsBeacon = false;
                 outputPacketBuffer.erase(outputPacketBuffer.begin());
                 delay(4000);
@@ -233,9 +235,13 @@ namespace STATION_Utils {
         }
     }
 
-    void addToOutputPacketBuffer(const String& packet, bool flag) {
+    void addToOutputPacketBuffer(const String& packet, bool flag, const RelayFrame* relay) {
         if (packet == "") return;                   // never queue an empty packet
         outputPacketBuffer.emplace_back(OutputPacketBuffer{packet, flag});
+        if (relay != nullptr) {
+            outputPacketBuffer.back().relay    = *relay;
+            outputPacketBuffer.back().hasRelay = true;
+        }
     }
 
 }

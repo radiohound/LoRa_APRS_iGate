@@ -21,8 +21,18 @@ Stored as `lora.txFormat` in the config (0 or 3; any other value reads as 0).
 ## Receiving
 
 LACF frames are always decoded, whatever the setting, and expanded to the text packet the rest of the firmware already handles (so they are gated to
-APRS-IS and digipeated like any other). The serial log says `LACF frame: N B on air, M B expanded`. This firmware has no RXT: a received RXT block
-is counted and dropped. A frame that fails the receiver rules of the spec is dropped.
+APRS-IS and digipeated like any other). The serial log says `LACF frame: N B on air, M B expanded`, and how many RXT tuples the frame carried. A frame that
+fails the receiver rules of the spec is dropped.
+
+## Digipeating (relay)
+
+When the digipeater relays an LACF frame and the Tx frame format is LACF, it follows the relay rule of spec 11: the new frame is built from the received bytes, so the source,
+destination, position block and content are copied as received, the tuples of the earlier hops are kept, and the iGate adds its own RXT tuple: the RSSI, SNR and frequency offset
+of the reception, and the time to hop, which runs from the end of the reception to the end of this transmission (queue, CAD and backoff included) and is filled in just before the
+frame is sent. The digipeater's own path rules (digipeater modes 1 to 3, cross-frequency) decide the new path, as for any packet. A relay adds 5 bytes to the first hop and 4 to each
+further one. A frame that would be longer than 255 bytes with its tuple goes out without it. Only a packet that is digipeated gets a tuple: not the iGate's own beacons, not packets
+from APRS-IS or MQTT. A standard LoRa APRS frame that is digipeated is sent as before, and with the Tx frame format on Text nothing changes. The serial log shows
+`LACF frame: N B instead of M B (relayed, RXT tuple added, time to hop T ms)`.
 
 ## Non-compliant WIDE paths
 
@@ -42,7 +52,7 @@ The earlier whole-text codec (`3C FF 81` and `3C FF C1`) has since been removed,
 
 Host tests (no board needed):
 
-* `sh test/lacf/run.sh`: the wrapper and the frame code against 40 spec vectors, 35 frames with RXT tuples, 28 rejection vectors and the WIDE rule (304 checks).
+* `sh test/lacf/run.sh`: the wrapper and the frame code against 40 spec vectors, 35 frames with RXT tuples, 28 rejection vectors, the WIDE rule, a sample of the spec relay vectors (first and later hops, edge cases) and the RXT scales (604 checks).
 * `sh test/events/run.sh`: the collector event lines, including the RFONLY/NOGATE privacy rule.
 * `sh test/configstore/run.sh`: safe saving of the settings file (123 checks).
 * `sh test/mqttdefaults/run.sh`: the pre-filled collector settings (10 cases).
@@ -57,6 +67,6 @@ and keeps the settings. LACF is still an experimental draft in early development
 
 ## Not done
 
-* No RXT: the iGate does not add its own measurement when it digipeats an LACF frame, and an RXT block it receives is counted and not carried on.
+* The relay with RXT has been tested on the host (the spec's relay vectors) but not yet on the air.
 * Frames of kind 0 and 1 (plain text frames of the earlier drafts) are not handled; they are dropped.
 * The earlier whole-text compressed frames (`3C FF 81`, `3C FF C1`) are no longer decoded or sent. They are dropped like any other `3C FF` frame of an unknown type, and the collector counts them as `parse_failed`. The `compressTx` and `compressFullEvery` settings are still read and written so that settings files do not change, but they do nothing.

@@ -21,6 +21,7 @@
 
 
 #include <Arduino.h>
+#include "relay_frame.h"
 
 
 struct LastHeardStation {
@@ -40,7 +41,7 @@ namespace STATION_Utils {
     bool isIn25SegHashBuffer(const String& station, const String& textMessage);
     void processOutputPacketBufferUltraEcoMode();
     void processOutputPacketBuffer();
-    void addToOutputPacketBuffer(const String& packet, bool flag = false);
+    void addToOutputPacketBuffer(const String& packet, bool flag = false, const RelayFrame* relay = nullptr);
 
 }
 

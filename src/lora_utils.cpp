@@ -30,6 +30,7 @@
 #include "utils.h"
 #include "thermal_utils.h"
 #include "hybrid_frame.h"
+#include "rxt_scale.h"
 #include "events_format.h"
 #include "mqtt_utils.h"
 
@@ -41,6 +42,7 @@ extern bool             packetIsBeacon;
 extern std::vector<ReceivedPacket> receivedPackets;
 
 bool operationDone      = true;
+static volatile uint32_t rxDoneMs = 0;      // millis() at the last interrupt of the radio (set in setFlag)
 bool transmitFlag       = true;
 
 #define DIFS_SLOTS      2       // Number of secuential CAD slots to consider a free channel to Tx
@@ -122,7 +124,7 @@ namespace LoRa_Utils {
         if (state == RADIOLIB_ERR_NONE || state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_LORA_HEADER_DAMAGED) {
             if (state == RADIOLIB_ERR_NONE && HYBRID_FRAME::isHybrid(buf, len)) {
                 // LACF, the LoRa APRS Compact Frame (3C FF 02, kind 2 or 3): expanded back to "\x3c\xff\x01" + text.
-                // An RXT block it may carry is counted and dropped: this firmware has no RXT.
+                // An RXT block it may carry is read here only to be counted: a relay of this frame is built from the received bytes (buildRelayFrame), which keep the tuples.
                 std::string tnc2;
                 int tuples = 0;
                 if (!HYBRID_FRAME::decode(buf, len, tnc2, &tuples)) {
@@ -132,7 +134,7 @@ namespace LoRa_Utils {
                 }
                 packet = "\x3c\xff\x01" + String(tnc2.c_str());
                 rxHybrid = true;
-                Utils::println("LACF frame: " + String(len) + " B on air, " + String(tnc2.size() + 3) + " B expanded" + (tuples > 0 ? " (RXT block not carried on)" : ""));
+                Utils::println("LACF frame: " + String(len) + " B on air, " + String(tnc2.size() + 3) + " B expanded" + (tuples > 0 ? " (" + String(tuples) + " RXT tuple" + (tuples > 1 ? "s" : "") + ")" : ""));
             } else if (len >= 3 && buf[0] == 0x3C && buf[1] == 0xFF && buf[2] != 0x01) {
                 // A 3C FF frame of a type we do not know (another model version, another format): drop it, never show it as text.
                 Utils::println("Frame with an unknown 3C FF type dropped: " + String(buf[2], HEX));
@@ -146,9 +148,44 @@ namespace LoRa_Utils {
         return state;
     }
 
-    // Sends one packet: as an LACF frame when the Tx frame format is Hybrid RXT Compression, otherwise as plain text.
     static int  txFrameClass = EventsFormat::PLAIN;     // what the last transmitText sent, for the collector's tx event
     static int  txAirBytes   = 0;
+
+    // The LACF frame of a relay (spec 11, "Relay") for the frame that was just received: newPacket is the packet as the digipeater's own rule has rewritten its path. The frame
+    // keeps the source, destination, position block and content as received and the tuples of the earlier hops, and carries this relay's tuple: the RSSI, SNR and frequency
+    // offset of the reception, and a placeholder for the time to hop, which is filled in at transmit time (transmitRelay). False when the last frame received was not LACF,
+    // when this station's Tx frame format is not LACF, or when the frame cannot be relayed as LACF; newPacket is then sent the usual way.
+    bool buildRelayFrame(const String& newPacket, RelayFrame& relay) {
+        if (Config.loramodule.txFormat != 3 || !rxHybrid || badLen == 0) return false;
+        const String own = Config.tacticalCallsign == "" ? Config.callsign : Config.tacticalCallsign;
+        const uint8_t tuple[4] = { RXT_Scale::rssi((float)rssi), RXT_Scale::snr(snr), RXT_Scale::frequencyOffset(freqError), 0 };
+        int offset = -1;
+        if (!HYBRID_FRAME::relay(badBuf, badLen, std::string(newPacket.c_str(), newPacket.length()), std::string(own.c_str(), own.length()), tuple, relay.frame, &offset)) {
+            Utils::println("LACF relay: the frame cannot be relayed as LACF, sent the usual way");
+            return false;
+        }
+        relay.ownOffset = offset;
+        relay.rxDoneMs  = rxDoneMs;
+        return true;
+    }
+
+    // Sends a relayed LACF frame (see buildRelayFrame). The time to hop runs from the end of the reception to the end of this transmission, queue, channel access (CAD, DIFS,
+    // backoff) and time on air included, so it is computed here, just before the frame goes out, and written into the relay's own tuple.
+    static int16_t transmitRelay(const String& text, const RelayFrame& relay) {
+        std::vector<uint8_t> frame = relay.frame;
+        unsigned long hopMs = 0;
+        if (relay.ownOffset >= 0 && (size_t)relay.ownOffset + 4 <= frame.size()) {
+            hopMs = (unsigned long)(millis() - relay.rxDoneMs) + (unsigned long)(radio.getTimeOnAir(frame.size()) / 1000);
+            frame[relay.ownOffset + 3] = RXT_Scale::timeToHop(hopMs, RXT_Scale::tthScale(Config.loramodule.rxSpreadingFactor, Config.loramodule.rxSignalBandwidth));
+        }
+        Utils::println("LACF frame: " + String(frame.size()) + " B instead of " + String(text.length() + 3) + " B (relayed" +
+                       (relay.ownOffset >= 0 ? ", RXT tuple added, time to hop " + String(hopMs) + " ms" : ", no RXT tuple of its own") + ")");
+        txFrameClass = EventsFormat::HYBRID;
+        txAirBytes   = frame.size();
+        return radio.transmit(frame.data(), frame.size());
+    }
+
+    // Sends one packet: as an LACF frame when the Tx frame format is Hybrid RXT Compression, otherwise as plain text.
 
     static int16_t transmitText(const String& text) {
         txFrameClass = EventsFormat::PLAIN;
@@ -167,6 +204,7 @@ namespace LoRa_Utils {
     }
 
     void setFlag(void) {
+        rxDoneMs = millis();                // when the radio last finished a reception (or a transmission): the start of the time to hop of a relayed frame
         operationDone = true;
     }
 
@@ -313,7 +351,7 @@ namespace LoRa_Utils {
         }
     }
 
-    void sendNewPacket(const String& newPacket) {
+    void sendNewPacket(const String& newPacket, const RelayFrame* relay) {
         if (!Config.loramodule.txActive) return;
         if (!HYBRID_FRAME::pathOk(std::string(newPacket.c_str(), newPacket.length()))) {
             // A WIDEn-N that breaks the APRS rule (n 1 to 7, N 1 to n) is not repeated on RF in any form (LACF, spec 11, "Non-compliant WIDE paths").
@@ -352,7 +390,7 @@ namespace LoRa_Utils {
             #ifdef FAN_CTRL_PIN
                 THERMAL_Utils::onTxStart();
             #endif
-            int state = transmitText(newPacket);
+            int state = (relay != nullptr && Config.loramodule.txFormat == 3) ? transmitRelay(newPacket, *relay) : transmitText(newPacket);
             #ifdef FAN_CTRL_PIN
                 THERMAL_Utils::onTxEnd();
             #endif

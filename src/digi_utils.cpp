@@ -215,7 +215,12 @@ namespace DIGI_Utils {
 
         String loraPacket = generateDigipeatedPacket(packet.substring(3));
         if (loraPacket != "") {
-            STATION_Utils::addToOutputPacketBuffer(loraPacket);
+            RelayFrame relay;
+            if (lastAprsPacket.header == "" && LoRa_Utils::buildRelayFrame(loraPacket, relay)) {
+                STATION_Utils::addToOutputPacketBuffer(loraPacket, false, &relay);      // an LACF frame relayed as LACF: it keeps the earlier hops' tuples and adds its own (spec 11, Relay)
+            } else {
+                STATION_Utils::addToOutputPacketBuffer(loraPacket);
+            }
             if (Config.digi.ecoMode != 1) displayToggle(true);
             lastScreenOn = millis();
         }

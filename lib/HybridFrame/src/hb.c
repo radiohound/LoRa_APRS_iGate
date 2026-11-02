@@ -492,57 +492,85 @@ int hb_decode(const uint8_t *fr, size_t n, char *tnc2, size_t cap, hb_info_t *in
       return (int)w; }
 }
 
+/* The relay, once the new path is known. fr is the received frame (accepted by hb_decode: in is its info, t its text parsed); t2 is the same packet with the
+ * relay's path: only the path may differ. Copies the source and the destination exactly as received, the position block and the content byte for byte, keeps the
+ * tuples of the earlier hops (each moves with its path element), and appends the relay's tuple at the element ownCall* of the new path. */
+static size_t relay_core(const uint8_t *fr, size_t n, const hb_info_t *in, const tnc_t *t, const tnc_t *t2, const char *relay_call, const uint8_t tuple[4], uint8_t *out, size_t cap)
+{
+    size_t i = 4, cs, end = n, w = 0, wr, pb = 0, from, fw = 4, base; int k, q, relay_idx = -1, own, np = t2->np; uint8_t hdr = fr[3]; char own_el[48]; hb_rxt_t rx;
+    uint8_t front[300];
+    snprintf(own_el, sizeof own_el, "%s*", relay_call);
+    for (k = 0; k < np; k++) if (!strcmp(t2->path[k], own_el)) { relay_idx = k; break; }
+    if (relay_idx < 0) return 0;
+    own = relay_idx <= 6;                                                   /* mask bits 0 to 6 only: an eighth element or later relays without its own tuple */
+    /* locate the parts to copy: re-walk the received front */
+    { char e[40]; size_t j = 4;
+      if (!dec_element(fr, n, &j, e, sizeof e)) return 0;
+      j++; { uint8_t code = fr[j - 1] & 0x3F; if (code == 63) { if (!dec_element(fr, n, &j, e, sizeof e)) return 0; } }
+      for (q = 0; q < in->npath; q++) if (!dec_element(fr, n, &j, e, sizeof e)) return 0;
+      pb = j;                                                               /* the position block (kind 3) starts here, the content after it */
+      if ((fr[3] & 3) == 3) { char pfx[96]; alt_t a; if (!pos_decode(fr, n, &j, pfx, sizeof pfx, &a)) return 0; }
+      i = j; }
+    cs = i; if (in->has_rxt) { int kk = in->rxt.n; end = n - (size_t)(4 * kk + 1); }
+    from = (hdr & 3) == 3 ? pb : cs;
+    memset(&rx, 0, sizeof rx);
+    if (in->has_rxt) for (q = 0; q < in->rxt.n; q++) {                      /* the earlier tuples, each with its path element */
+        int oj = in->rxt.idx[q], m, pos, x;
+        if (oj >= relay_idx || oj >= t->np) return 0;                       /* a tuple on the relay's own element or a later one: not relayed (spec 11, Relay, step 3) */
+        if (oj < np && !strcmp(t2->path[oj], t->path[oj])) m = oj;
+        else { for (m = 0; m < relay_idx; m++) if (!strcmp(t2->path[m], t->path[oj])) break; if (m == relay_idx) continue; }   /* the element is gone: its tuple goes with it */
+        pos = rx.n; while (pos > 0 && rx.idx[pos - 1] > m) pos--;
+        if (pos > 0 && rx.idx[pos - 1] == m) continue;
+        for (x = rx.n; x > pos; x--) { rx.idx[x] = rx.idx[x - 1]; memcpy(rx.t[x], rx.t[x - 1], 4); }
+        rx.idx[pos] = (uint8_t)m; memcpy(rx.t[pos], in->rxt.t[q], 4); rx.n++;
+    }
+    if (own && rx.n >= HB_MAX_TUPLES) return 0;                              /* an eighth element or later adds no tuple, so it can relay a frame that already has seven */
+    /* new front */
+    front[0] = 0x3C; front[1] = 0xFF; front[2] = 0x02;
+    if (in->path_start < 4 || in->path_start - 4 > sizeof front - 4) return 0;
+    memcpy(front + fw, fr + 4, in->path_start - 4); fw += in->path_start - 4;   /* source and destination exactly as received (spec 11, Relay step 1) */
+    for (k = 0; k < np; k++) { if (!enc_element(t2->path[k], front + fw, sizeof front - fw, &wr)) return 0; fw += wr; }
+    /* size: a LoRa frame holds 255 bytes. A frame that would be longer with the relay's own tuple goes out without it (the earlier tuples stay); if it is too long even then, it is not relayed */
+    base = fw + (end - from);
+    if (own && (base + 4 * (size_t)(rx.n + 1) + 1 > 255 || base + 4 * (size_t)(rx.n + 1) + 1 > cap)) own = 0;
+    if (base + (rx.n + own ? 4 * (size_t)(rx.n + own) + 1 : 0) > 255 || base + (rx.n + own ? 4 * (size_t)(rx.n + own) + 1 : 0) > cap) return 0;
+    front[3] = (uint8_t)((np << 4) | ((rx.n + own) ? 0x08 : 0) | (hdr & 0x07));
+    memcpy(out, front, fw); w = fw;
+    /* position block and content copied byte for byte (everything between the old front and the old RXT block) */
+    memcpy(out + w, fr + from, end - from); w += end - from;
+    /* tuples: the old ones, then the relay's (its element index is the largest) */
+    if (own) { for (q = 0; q < 4; q++) rx.t[rx.n][q] = tuple[q]; rx.idx[rx.n] = (uint8_t)relay_idx; rx.n++;
+        if (rx.n > 1 && rx.idx[rx.n - 2] >= rx.idx[rx.n - 1]) return 0; }
+    if (rx.n) w += rxt_bytes(&rx, out + w);
+    (void)i; (void)cs;
+    return w;
+}
+
+size_t hb_relay_to(const uint8_t *fr, size_t n, const char *new_tnc2, size_t new_len, const char *relay_call, const uint8_t tuple[4], uint8_t *out, size_t cap)
+{
+    char tn[700]; hb_info_t in; tnc_t t, t2; int len = hb_decode(fr, n, tn, sizeof tn, &in);
+    if (len <= 0 || !tnc_parse(tn, (size_t)len, &t) || !tnc_parse(new_tnc2, new_len, &t2)) return 0;
+    if (strcmp(t.src, t2.src) || strcmp(t.dest, t2.dest) || t.ilen != t2.ilen || memcmp(t.info, t2.info, t.ilen)) return 0;    /* only the path may differ */
+    return relay_core(fr, n, &in, &t, &t2, relay_call, tuple, out, cap);
+}
+
 size_t hb_relay(const uint8_t *fr, size_t n, const char *relay_call, const uint8_t tuple[4], uint8_t *out, size_t cap)
 {
-    char tn[700]; hb_info_t in; tnc_t t; int len = hb_decode(fr, n, tn, sizeof tn, &in);
-    size_t i = 4, cs, end = n, w = 0, wr; int k, relay_idx = -1, own; uint8_t hdr; char tmp[40]; hb_rxt_t rx;
-    uint8_t front[300]; char path[16][40]; int np;
+    char tn[700]; hb_info_t in; tnc_t t, t2; int len = hb_decode(fr, n, tn, sizeof tn, &in);
+    int k, relay_idx = -1; char tmp[40];
     if (len <= 0 || !tnc_parse(tn, (size_t)len, &t)) return 0;
-    hdr = fr[3];
-    np = t.np; for (k = 0; k < np; k++) strcpy(path[k], t.path[k]);
-    for (k = 0; k < np; k++) {                                              /* the first element that is not yet used */
-        size_t l = strlen(path[k]);
-        if (l && path[k][l - 1] == '*') continue;
-        if (!strcmp(path[k], "WIDE1-1")) { snprintf(tmp, sizeof tmp, "%s*", relay_call); strcpy(path[k], tmp); relay_idx = k; }
-        else if (!strcmp(path[k], "WIDE2-1")) { snprintf(tmp, sizeof tmp, "%s*", relay_call); strcpy(path[k], tmp); relay_idx = k; }
-        else if (!strcmp(path[k], "WIDE2-2") && np < 15) {
-            int q; for (q = np; q > k + 1; q--) strcpy(path[q], path[q - 1]);
-            snprintf(tmp, sizeof tmp, "%s*", relay_call); strcpy(path[k], tmp); strcpy(path[k + 1], "WIDE2-1"); np++; relay_idx = k;
+    t2 = t;
+    for (k = 0; k < t2.np; k++) {                                           /* the first element that is not yet used */
+        size_t l = strlen(t2.path[k]);
+        if (l && t2.path[k][l - 1] == '*') continue;
+        if (!strcmp(t2.path[k], "WIDE1-1")) { snprintf(tmp, sizeof tmp, "%s*", relay_call); strcpy(t2.path[k], tmp); relay_idx = k; }
+        else if (!strcmp(t2.path[k], "WIDE2-1")) { snprintf(tmp, sizeof tmp, "%s*", relay_call); strcpy(t2.path[k], tmp); relay_idx = k; }
+        else if (!strcmp(t2.path[k], "WIDE2-2") && t2.np < 15) {
+            int q; for (q = t2.np; q > k + 1; q--) strcpy(t2.path[q], t2.path[q - 1]);
+            snprintf(tmp, sizeof tmp, "%s*", relay_call); strcpy(t2.path[k], tmp); strcpy(t2.path[k + 1], "WIDE2-1"); t2.np++; relay_idx = k;
         } else return 0;
         break;
     }
     if (relay_idx < 0) return 0;
-    own = relay_idx <= 6;                                                   /* mask bits 0 to 6 only: an eighth element or later relays without its own tuple */
-    /* locate the parts to copy: re-walk the received front */
-    { char e[40]; size_t j = 4; int q;
-      if (!dec_element(fr, n, &j, e, sizeof e)) return 0;
-      j++; { uint8_t code = fr[j - 1] & 0x3F; if (code == 63) { if (!dec_element(fr, n, &j, e, sizeof e)) return 0; } }
-      for (q = 0; q < in.npath; q++) if (!dec_element(fr, n, &j, e, sizeof e)) return 0;
-      if ((fr[3] & 3) == 3) { char pfx[96]; alt_t a; if (!pos_decode(fr, n, &j, pfx, sizeof pfx, &a)) return 0; }
-      i = j; }
-    cs = i; if (in.has_rxt) { int kk = in.rxt.n; end = n - (size_t)(4 * kk + 1); }
-    rx = in.has_rxt ? in.rxt : (hb_rxt_t){ 0 };
-    if (own && rx.n >= HB_MAX_TUPLES) return 0;                              /* an eighth element or later adds no tuple, so it can relay a frame that already has seven */
-    /* new front */
-    front[0] = 0x3C; front[1] = 0xFF; front[2] = 0x02;
-    front[3] = (uint8_t)((np << 4) | ((rx.n + own) ? 0x08 : 0) | (hdr & 0x07));
-    { size_t fw = 4;
-      if (in.path_start < 4 || in.path_start - 4 > sizeof front - 4) return 0;
-      memcpy(front + fw, fr + 4, in.path_start - 4); fw += in.path_start - 4;   /* source and destination exactly as received (spec 11, Relay step 1) */
-      for (k = 0; k < np; k++) { if (!enc_element(path[k], front + fw, sizeof front - fw, &wr)) return 0; fw += wr; }
-      if (fw + (end - (cs - 0)) + 8 + (size_t)rx.n * 4 + 5 > cap) return 0;
-      memcpy(out, front, fw); w = fw; }
-    /* position block and content copied byte for byte (everything between the old front and the old RXT block) */
-    { size_t pb = 0; if ((hdr & 3) == 3) { size_t j = 4; char e[40]; int q; alt_t a; char pfx[96];
-        dec_element(fr, n, &j, e, sizeof e); { uint8_t code = fr[j] & 0x3F; j++; if (code == 63) dec_element(fr, n, &j, e, sizeof e); }
-        for (q = 0; q < in.npath; q++) dec_element(fr, n, &j, e, sizeof e);
-        pb = j; pos_decode(fr, n, &j, pfx, sizeof pfx, &a); cs = j; (void)pb; }
-      { size_t from = (hdr & 3) == 3 ? pb : cs; memcpy(out + w, fr + from, end - from); w += end - from; } }
-    /* tuples: the old ones, then the relay's (its element index is the largest) */
-    { int q; if (own) { rx.idx[rx.n] = (uint8_t)relay_idx; for (q = 0; q < 4; q++) rx.t[rx.n][q] = tuple[q]; rx.n++;
-        if (rx.n > 1 && rx.idx[rx.n - 2] >= rx.idx[rx.n - 1]) return 0; }
-      if (rx.n) w += rxt_bytes(&rx, out + w); }
-    (void)i;
-    if (w > 255) return 0;                                                  /* a LoRa frame holds 255 bytes */
-    return w;
+    return relay_core(fr, n, &in, &t, &t2, relay_call, tuple, out, cap);
 }
