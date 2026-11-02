@@ -67,6 +67,6 @@ and keeps the settings. LACF is still an experimental draft in early development
 
 ## Not done
 
-* The relay with RXT has been tested on the host (the spec's relay vectors) but not yet on the air.
+* The relay with RXT was tested on the host (the spec's relay vectors) and run on the air on 2 November 2026 with a T-Deck: the iGate relayed T-Deck beacons of 58 and 25 bytes as 67 and 34 bytes, and decoded a T-Deck relay of its own beacon (29 to 38 bytes, one tuple). Not yet: a frame through two relays, and a packet near the 255-byte limit on the air.
 * Frames of kind 0 and 1 (plain text frames of the earlier drafts) are not handled; they are dropped.
 * The earlier whole-text compressed frames (`3C FF 81`, `3C FF C1`) are no longer decoded or sent. They are dropped like any other `3C FF` frame of an unknown type, and the collector counts them as `parse_failed`. The `compressTx` and `compressFullEvery` settings are still read and written so that settings files do not change, but they do nothing.
