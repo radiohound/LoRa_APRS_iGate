@@ -26,7 +26,7 @@ may add was created by Jon, N7UV. This firmware is built on Ricardo Guzman's (CA
 * **Size:** 43.8% fewer bytes on 14,305 real packets (86.6 B to 48.7 B on average), and 41.9% on 93,145 held-out packets from a 24-hour APRS-IS capture,
   with the current frame (CRC-16 included). Single frames sent by this iGate: 29 B instead of 50 B.
 * **Flash use:** the earlier whole-text compressed format (`3C FF 81`, `3C FF C1`) has been removed from this branch, because no station sends it any more. Frames of that kind are dropped and counted by the
-  collector. The LoRa32 build now uses 84.7% of the app slot and 53,860 bytes of RAM.
+  collector. The LoRa32 build now uses 85.0% of the app slot and 53,876 bytes of RAM.
 * Tested on the air between a LoRa32 iGate, a T-Deck tracker and a Dire Wolf station on a hill, on 31 October and 1 November 2026. The test results are in
   [`docs/lacf-test-results-2026-11-01.md`](https://github.com/radiohound/aprs-compression-proposal/blob/main/docs/lacf-test-results-2026-11-01.md).
   Not tested yet: a busy channel, other spreading factors, how other firmware reacts to an LACF frame, and power draw. Please use spare boards only.

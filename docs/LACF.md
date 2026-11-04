@@ -46,7 +46,7 @@ so LACF, the MQTT feed and the other additions of this branch cost about 330 KB.
 Bluetooth, and the call alone makes the Arduino core link about 128 KB of Bluetooth support (found by F4MLV; measured again on 1 November 2026 on `main`: 1,602,737
 bytes (81.5%) became 1,474,561 (75.0%), and RAM 17.2% became 16.0%). The frame code runs in a task of its own with a 16 KB stack, created at the first use.
 
-The earlier whole-text codec (`3C FF 81` and `3C FF C1`) has since been removed, because no station sends it any more. Built from the commit that removes it, the LoRa32 build is 1,664,817 bytes (84.7% of the slot; was 1,797,625, 91.4%) and uses 53,860 bytes of RAM (was 68,588); the ESP32-C3 build is 1,654,510 bytes (84.2%; was 1,782,746) and 46,468 bytes of RAM (was 61,252). That build is not yet the published firmware.
+The earlier whole-text codec (`3C FF 81` and `3C FF C1`) has since been removed, because no station sends it any more. Built from the commit that removes it, the LoRa32 build is 1,664,817 bytes (84.7% of the slot; was 1,797,625, 91.4%) and uses 53,860 bytes of RAM (was 68,588); the ESP32-C3 build is 1,654,510 bytes (84.2%; was 1,782,746) and 46,468 bytes of RAM (was 61,252). The published build (f3d26ae, which adds relay with RXT) is 1,672,049 bytes (85.0% of the slot) and uses 53,876 bytes of RAM for the LoRa32; the figures above are from the commit that removed the codec.
 
 ## Tests
 
