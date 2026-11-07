@@ -90,7 +90,7 @@ public:
     bool    cadActive;
     bool    compressTx;     // unused since the earlier whole-text codec was removed; kept so settings files do not change
     int     compressFullEvery; // unused, as compressTx
-    int     txFormat;       // Tx frame format: 0 Text (standard), 3 Hybrid RXT Compression (LACF); other values read as 0
+    int     txFormat;       // Tx frame format: 0 Text (standard), 3 LACF 2.0.0 (frame type 02), 4 LACF 3.0.0-dev.1 (frame type 03, experimental); other values read as 0
 };
 
 class Display {

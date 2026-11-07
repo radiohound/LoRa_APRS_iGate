@@ -18,8 +18,8 @@ namespace HYBRID_FRAME {
     // or its path holds a non-compliant WIDEn-N (the caller must then DROP the packet, see pathOk()).
     bool encode(const std::string& tnc2, std::vector<uint8_t>& out);
 
-    // TNC2 packet to a 3C FF 03 frame (3.0.0-dev.1, no capability bytes). Same contract as encode().
-    bool encode3(const std::string& tnc2, std::vector<uint8_t>& out);
+    // TNC2 packet to a 3C FF 03 frame (3.0.0-dev.1). cap, if given, points to the four capability bytes (V bit 7 is then set and they follow V). Same contract as encode().
+    bool encode3(const std::string& tnc2, std::vector<uint8_t>& out, const uint8_t* cap = nullptr);
 
     // The front of a 3C FF 03 frame whatever its model: the structure and the CRC (over the bytes as sent) are checked, the content is not decoded. frontText is
     // "SRC>DST,PATH:" (DST is "?" when its code is not assigned), so a digipeater can apply its own path rule to a frame it cannot decode; relay() then forwards
@@ -27,7 +27,8 @@ namespace HYBRID_FRAME {
     bool front(const uint8_t* data, size_t size, std::string& frontText, unsigned* key = nullptr);
 
     // LACF frame to TNC2. False when the receiver rules drop the frame. rxtTuples, if given, gets the number of RXT tuples the frame carried.
-    bool decode(const uint8_t* data, size_t size, std::string& tnc2, int* rxtTuples = nullptr);
+    // capOut (four bytes) and hasCap, if given, get the capability bytes of a 3C FF 03 frame that carries them.
+    bool decode(const uint8_t* data, size_t size, std::string& tnc2, int* rxtTuples = nullptr, uint8_t* capOut = nullptr, bool* hasCap = nullptr);
 
     // The outgoing LACF frame of a relay (spec 11, "Relay"): the received frame rxFrame with the new path newTnc2 (the digipeater's own rule has already been
     // applied to it, so it holds ownCall + "*" as the element it used), the tuples of the earlier hops kept (moved with their path elements), and the relay's

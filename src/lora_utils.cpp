@@ -34,6 +34,7 @@
 #include "events_format.h"
 #include "mqtt_utils.h"
 #include "digi_utils.h"
+#include "lacf_capability.h"
 
 
 extern Configuration    Config;
@@ -116,6 +117,25 @@ namespace LoRa_Utils {
     bool lastRxWasHybrid()          { return rxHybrid; }
     size_t lastRxAirBytes()         { return rxAirBytes; }
 
+    // 3.0.0-dev.1 capability bytes (spec 12): what this station is, from its settings, when to send them, and what the neighbours have announced.
+    static LACF_CAP::Schedule  capSchedule;
+    static LACF_CAP::Neighbors capNeighbors;
+
+    static LACF_CAP::Capability ownCapability() {
+        LACF_CAP::Capability c;
+        const bool digi = Config.loramodule.txActive && (Config.digi.mode == 1 || Config.digi.mode == 2 || Config.digi.mode == 3);
+        if (!Config.loramodule.rxActive)   c.role = LACF_CAP::ROLE_TX_ONLY;
+        else if (Config.aprs_is.active)    c.role = digi ? LACF_CAP::ROLE_IGATE_DIGIPEATER : LACF_CAP::ROLE_IGATE;
+        else                               c.role = digi ? LACF_CAP::ROLE_DIGIPEATER : LACF_CAP::ROLE_LISTENS;
+        c.model  = LACF_CAP::MODEL_0_HELD;                                      // this firmware holds model 0
+        c.sf     = LACF_CAP::sfCode(Config.loramodule.txSpreadingFactor);
+        c.bw     = LACF_CAP::bwCode(Config.loramodule.txSignalBandwidth);
+        c.cr     = LACF_CAP::crCode(Config.loramodule.txCodingRate4);
+        c.power  = LACF_CAP::powerCode(Config.loramodule.power);                // the configured output of the module in dBm, not the power radiated
+        c.preset = LACF_CAP::presetFor(Config.loramodule.txFreq);
+        return c;
+    }
+
     static int16_t readFrame(String& packet) {
         size_t len = radio.getPacketLength();
         if (len > 255) len = 255;
@@ -132,12 +152,24 @@ namespace LoRa_Utils {
                 // An RXT block it may carry is read here only to be counted: a relay of this frame is built from the received bytes (buildRelayFrame), which keep the tuples.
                 std::string tnc2;
                 int tuples = 0;
-                if (!HYBRID_FRAME::decode(buf, len, tnc2, &tuples)) {
+                uint8_t capBytes[LACF_CAP::BYTES];
+                bool hasCap = false;
+                if (!HYBRID_FRAME::decode(buf, len, tnc2, &tuples, capBytes, &hasCap)) {
                     Utils::println("LACF frame dropped (" + String(len) + " B)");
                     undecoded = EventsFormat::PARSE_FAILED;
                     // A 3C FF 03 frame we cannot decode (a model or destination code we do not hold) but whose structure and CRC are good may still be relayed.
                     if (HYBRID_FRAME::front(buf, len, relayOnlyFront, &relayOnlyKey)) rxRelayOnly = true;
                     return RADIOLIB_ERR_UNKNOWN;
+                }
+                if (hasCap) {                                    // the sender announced itself (3.0.0-dev.1): kept per station, direct or heard through a relay
+                    LACF_CAP::Capability cap;
+                    LACF_CAP::parse(capBytes, cap);
+                    const size_t gt = tnc2.find('>'), colon = tnc2.find(':');
+                    if (gt != std::string::npos && colon != std::string::npos && gt < colon) {
+                        const bool direct = tnc2.substr(0, colon).find('*') == std::string::npos;
+                        capNeighbors.update(tnc2.substr(0, gt), cap, direct, millis());
+                        Utils::println("Capabilities of " + String(tnc2.substr(0, gt).c_str()) + " (" + (direct ? "direct" : "via a relay") + "): " + String(LACF_CAP::describe(cap).c_str()));
+                    }
                 }
                 packet = "\x3c\xff\x01" + String(tnc2.c_str());
                 rxHybrid = true;
@@ -200,11 +232,23 @@ namespace LoRa_Utils {
         if (Config.loramodule.txFormat == 3 || Config.loramodule.txFormat == 4) {      // Tx frame format: Hybrid RXT Compression (LACF); 4 = the experimental 3.0.0-dev.1 frame (3C FF 03)
             std::vector<uint8_t> lacf;
             const std::string packet(text.c_str(), text.length());
-            if (Config.loramodule.txFormat == 4 ? HYBRID_FRAME::encode3(packet, lacf) : HYBRID_FRAME::encode(packet, lacf)) {
-                Utils::println("LACF frame: " + String(lacf.size()) + " B instead of " + String(text.length() + 3) + " B");
+            bool withCap = false;
+            uint8_t capBytes[LACF_CAP::BYTES];
+            bool encoded;
+            if (Config.loramodule.txFormat == 4) {                                       // 3.0.0-dev.1: the capability bytes ride on some of the frames (spec 12, Schedule)
+                if (capSchedule.due(millis())) { LACF_CAP::pack(ownCapability(), capBytes); withCap = true; }
+                encoded = HYBRID_FRAME::encode3(packet, lacf, withCap ? capBytes : nullptr);
+                if (!encoded && withCap) { withCap = false; encoded = HYBRID_FRAME::encode3(packet, lacf); }     // too long with them: send it without, they go with a later frame
+            } else {
+                encoded = HYBRID_FRAME::encode(packet, lacf);
+            }
+            if (encoded) {
+                Utils::println("LACF frame: " + String(lacf.size()) + " B instead of " + String(text.length() + 3) + " B" + (withCap ? " (with the capability bytes)" : ""));
                 txFrameClass = EventsFormat::HYBRID;
                 txAirBytes   = lacf.size();
-                return radio.transmit(lacf.data(), lacf.size());
+                const int16_t sent = radio.transmit(lacf.data(), lacf.size());
+                if (Config.loramodule.txFormat == 4 && sent == RADIOLIB_ERR_NONE) { if (withCap) capSchedule.sent(millis()); else capSchedule.noteFrame(); }
+                return sent;
             }
             Utils::println("LACF: sent as text, the packet cannot be encoded");
         }
@@ -398,7 +442,7 @@ namespace LoRa_Utils {
             #ifdef FAN_CTRL_PIN
                 THERMAL_Utils::onTxStart();
             #endif
-            int state = (relay != nullptr && Config.loramodule.txFormat == 3) ? transmitRelay(newPacket, *relay) : transmitText(newPacket);
+            int state = (relay != nullptr && (Config.loramodule.txFormat == 3 || Config.loramodule.txFormat == 4)) ? transmitRelay(newPacket, *relay) : transmitText(newPacket);
             #ifdef FAN_CTRL_PIN
                 THERMAL_Utils::onTxEnd();
             #endif

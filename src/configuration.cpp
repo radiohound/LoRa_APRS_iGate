@@ -362,7 +362,7 @@ bool Configuration::readFile() {
         loramodule.compressTx           = data["lora"]["compressTx"] | false;
         loramodule.compressFullEvery    = data["lora"]["compressFullEvery"] | 2;
         loramodule.txFormat             = data["lora"]["txFormat"] | 0;
-        if (loramodule.txFormat != 0 && loramodule.txFormat != 3) loramodule.txFormat = 0;
+        if (loramodule.txFormat != 0 && loramodule.txFormat != 3 && loramodule.txFormat != 4) loramodule.txFormat = 0;
 
         if (data["display"]["alwaysOn"].isNull() ||
             data["display"]["timeout"].isNull() ||

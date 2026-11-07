@@ -8,7 +8,8 @@
       "+<hb3.c>",
       "+<hbi.c>",
       "+<hbc.c>",
-      "+<hybrid_frame.cpp>"
+      "+<hybrid_frame.cpp>",
+      "+<lacf_capability.cpp>"
     ],
     "flags": [
       "-DHB_FAST",

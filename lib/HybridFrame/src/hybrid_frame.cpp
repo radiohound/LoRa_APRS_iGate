@@ -34,6 +34,7 @@ namespace HYBRID_FRAME {
             hb_info_t info;
             int rxtCount;                                            // OP_DECODE: the RXT tuples of the frame, either type
             unsigned key;                                            // OP_FRONT: the frame's CRC-16
+            const uint8_t* cap; uint8_t capOut[4]; bool hasCap;      // OP_ENCODE3: the capability bytes to send; OP_DECODE: those the frame carried
             long result;
             const char* own; size_t ownLen; uint8_t ownTuple[4]; int ownOffset;      // OP_RELAY: the relay's callsign, its tuple, and where its tuple ended up
         };
@@ -79,7 +80,7 @@ namespace HYBRID_FRAME {
             static bool listSet = false;
             if (!listSet) { hb_set_list(SET1, SET1_N); hb3_set_list(SET1, SET1_N); listSet = true; }
             if (j.op == OP_ENCODE) j.result = (long)hb_encode(j.tnc2, j.tnc2Len, nullptr, j.out, j.outCap, &j.info);
-            else if (j.op == OP_ENCODE3) { hb3_info_t i3; j.result = (long)hb3_encode_cap(j.tnc2, j.tnc2Len, nullptr, nullptr, j.out, j.outCap, &i3); }
+            else if (j.op == OP_ENCODE3) { hb3_info_t i3; j.result = (long)hb3_encode_cap(j.tnc2, j.tnc2Len, nullptr, j.cap, j.out, j.outCap, &i3); }
             else if (j.op == OP_RELAY) j.result = relayRun(j);
             else if (j.op == OP_FRONT) {
                 hb3_info_t i3;
@@ -89,7 +90,7 @@ namespace HYBRID_FRAME {
                     j.key = (unsigned)(j.frame[off] | (j.frame[off + 1] << 8));
                 }
             }
-            else if (j.frame[2] == 0x03) { hb3_info_t i3; j.result = (long)hb3_decode(j.frame, j.frameLen, j.text, j.textCap, &i3); j.rxtCount = i3.has_rxt ? i3.rxt.n : 0; }
+            else if (j.frame[2] == 0x03) { hb3_info_t i3; j.result = (long)hb3_decode(j.frame, j.frameLen, j.text, j.textCap, &i3); j.rxtCount = i3.has_rxt ? i3.rxt.n : 0; j.hasCap = i3.has_cap != 0; std::memcpy(j.capOut, i3.cap, 4); }
             else { j.result = (long)hb_decode(j.frame, j.frameLen, j.text, j.textCap, &j.info); j.rxtCount = j.info.has_rxt ? j.info.rxt.n : 0; }
         }
 
@@ -162,11 +163,11 @@ namespace HYBRID_FRAME {
         return true;
     }
 
-    bool encode3(const std::string& tnc2, std::vector<uint8_t>& out) {
+    bool encode3(const std::string& tnc2, std::vector<uint8_t>& out, const uint8_t* cap) {
         Job j;
         std::memset(&j, 0, sizeof j);
         uint8_t frame[256];
-        j.op = OP_ENCODE3; j.tnc2 = tnc2.data(); j.tnc2Len = tnc2.size(); j.out = frame; j.outCap = sizeof frame;
+        j.op = OP_ENCODE3; j.tnc2 = tnc2.data(); j.tnc2Len = tnc2.size(); j.cap = cap; j.out = frame; j.outCap = sizeof frame;
         if (!call(j) || j.result <= 0 || j.result > 255) return false;
         out.assign(frame, frame + j.result);
         return true;
@@ -199,7 +200,7 @@ namespace HYBRID_FRAME {
         return true;
     }
 
-    bool decode(const uint8_t* data, size_t size, std::string& tnc2, int* rxtTuples) {
+    bool decode(const uint8_t* data, size_t size, std::string& tnc2, int* rxtTuples, uint8_t* capOut, bool* hasCap) {
         Job j;
         std::memset(&j, 0, sizeof j);
         std::vector<char> text(700);
@@ -207,6 +208,8 @@ namespace HYBRID_FRAME {
         if (!call(j) || j.result <= 0) return false;
         tnc2.assign(text.data(), (size_t)j.result);
         if (rxtTuples) *rxtTuples = j.rxtCount;
+        if (hasCap) *hasCap = j.hasCap;
+        if (capOut && j.hasCap) std::memcpy(capOut, j.capOut, 4);
         return true;
     }
 

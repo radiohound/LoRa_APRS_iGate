@@ -268,7 +268,7 @@ namespace WEB_Utils {
         Config.digi.ecoMode                 = getParamIntSafe("digi.ecoMode", Config.digi.ecoMode);
         Config.digi.backupDigiMode          = request->hasParam("digi.backupDigiMode", true);
         Config.loramodule.txFormat          = getParamIntSafe("lora.txFormat", Config.loramodule.txFormat);
-        if (Config.loramodule.txFormat != 0 && Config.loramodule.txFormat != 3) Config.loramodule.txFormat = 0;
+        if (Config.loramodule.txFormat != 0 && Config.loramodule.txFormat != 3 && Config.loramodule.txFormat != 4) Config.loramodule.txFormat = 0;
 
         Config.loramodule.rxActive          = request->hasParam("lora.rxActive", true);
         Config.loramodule.rxFreq            = getParamIntSafe("lora.rxFreq", Config.loramodule.rxFreq);
