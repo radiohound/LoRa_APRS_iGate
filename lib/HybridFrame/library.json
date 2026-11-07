@@ -5,6 +5,7 @@
   "build": {
     "srcFilter": [
       "+<hb.c>",
+      "+<hb3.c>",
       "+<hbi.c>",
       "+<hbc.c>",
       "+<hybrid_frame.cpp>"

@@ -11,12 +11,20 @@
 
 namespace HYBRID_FRAME {
 
-    // True for 3C FF 02 (any kind).
+    // True for 3C FF 02 (the tested 2.0.0 frame) and for 3C FF 03 (the experimental 3.0.0-dev.1 frame, spec 12; a second decoder, local experiment).
     bool isHybrid(const uint8_t* data, size_t size);
 
     // TNC2 packet ("SRC>DST,PATH:info", no 3C FF 01 prefix) to an LACF frame. False when the packet cannot be encoded (the caller then sends it as text)
     // or its path holds a non-compliant WIDEn-N (the caller must then DROP the packet, see pathOk()).
     bool encode(const std::string& tnc2, std::vector<uint8_t>& out);
+
+    // TNC2 packet to a 3C FF 03 frame (3.0.0-dev.1, no capability bytes). Same contract as encode().
+    bool encode3(const std::string& tnc2, std::vector<uint8_t>& out);
+
+    // The front of a 3C FF 03 frame whatever its model: the structure and the CRC (over the bytes as sent) are checked, the content is not decoded. frontText is
+    // "SRC>DST,PATH:" (DST is "?" when its code is not assigned), so a digipeater can apply its own path rule to a frame it cannot decode; relay() then forwards
+    // it without the model. key, if given, gets the frame's CRC-16, to recognise a repeat. False for any other frame.
+    bool front(const uint8_t* data, size_t size, std::string& frontText, unsigned* key = nullptr);
 
     // LACF frame to TNC2. False when the receiver rules drop the frame. rxtTuples, if given, gets the number of RXT tuples the frame carried.
     bool decode(const uint8_t* data, size_t size, std::string& tnc2, int* rxtTuples = nullptr);

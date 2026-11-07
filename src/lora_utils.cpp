@@ -33,6 +33,7 @@
 #include "rxt_scale.h"
 #include "events_format.h"
 #include "mqtt_utils.h"
+#include "digi_utils.h"
 
 
 extern Configuration    Config;
@@ -107,6 +108,9 @@ namespace LoRa_Utils {
     static size_t rxAirBytes   = 0;
     static uint8_t  badBuf[256];                // the bytes of the last frame that was heard but not decoded
     static size_t   badLen     = 0;
+    static bool     rxRelayOnly = false;        // the last frame was a 3C FF 03 frame we cannot decode but can relay (checked structure and CRC): see processRelayOnly
+    static std::string relayOnlyFront;
+    static unsigned relayOnlyKey = 0;
     static int      undecoded  = -1;            // EventsFormat::Outcome of that frame, -1 = none
 
     bool lastRxWasHybrid()          { return rxHybrid; }
@@ -121,6 +125,7 @@ namespace LoRa_Utils {
         undecoded = -1;
         if (state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_NONE) { memcpy(badBuf, buf, len); badLen = len; }
         rxHybrid = false;
+        rxRelayOnly = false;
         if (state == RADIOLIB_ERR_NONE || state == RADIOLIB_ERR_CRC_MISMATCH || state == RADIOLIB_ERR_LORA_HEADER_DAMAGED) {
             if (state == RADIOLIB_ERR_NONE && HYBRID_FRAME::isHybrid(buf, len)) {
                 // LACF, the LoRa APRS Compact Frame (3C FF 02, raw or LACF content, any kind): expanded back to "\x3c\xff\x01" + text.
@@ -130,6 +135,8 @@ namespace LoRa_Utils {
                 if (!HYBRID_FRAME::decode(buf, len, tnc2, &tuples)) {
                     Utils::println("LACF frame dropped (" + String(len) + " B)");
                     undecoded = EventsFormat::PARSE_FAILED;
+                    // A 3C FF 03 frame we cannot decode (a model or destination code we do not hold) but whose structure and CRC are good may still be relayed.
+                    if (HYBRID_FRAME::front(buf, len, relayOnlyFront, &relayOnlyKey)) rxRelayOnly = true;
                     return RADIOLIB_ERR_UNKNOWN;
                 }
                 packet = "\x3c\xff\x01" + String(tnc2.c_str());
@@ -156,7 +163,7 @@ namespace LoRa_Utils {
     // offset of the reception, and a placeholder for the time to hop, which is filled in at transmit time (transmitRelay). False when the last frame received was not LACF,
     // when this station's Tx frame format is not LACF, or when the frame cannot be relayed as LACF; newPacket is then sent the usual way.
     bool buildRelayFrame(const String& newPacket, RelayFrame& relay) {
-        if (Config.loramodule.txFormat != 3 || !rxHybrid || badLen == 0) return false;
+        if ((Config.loramodule.txFormat != 3 && Config.loramodule.txFormat != 4) || !(rxHybrid || rxRelayOnly) || badLen == 0) return false;
         const String own = Config.tacticalCallsign == "" ? Config.callsign : Config.tacticalCallsign;
         const uint8_t tuple[4] = { RXT_Scale::rssi((float)rssi), RXT_Scale::snr(snr), RXT_Scale::frequencyOffset(freqError), 0 };
         int offset = -1;
@@ -190,9 +197,10 @@ namespace LoRa_Utils {
     static int16_t transmitText(const String& text) {
         txFrameClass = EventsFormat::PLAIN;
         txAirBytes   = text.length() + 3;
-        if (Config.loramodule.txFormat == 3) {                     // Tx frame format: Hybrid RXT Compression (LACF)
+        if (Config.loramodule.txFormat == 3 || Config.loramodule.txFormat == 4) {      // Tx frame format: Hybrid RXT Compression (LACF); 4 = the experimental 3.0.0-dev.1 frame (3C FF 03)
             std::vector<uint8_t> lacf;
-            if (HYBRID_FRAME::encode(std::string(text.c_str(), text.length()), lacf)) {
+            const std::string packet(text.c_str(), text.length());
+            if (Config.loramodule.txFormat == 4 ? HYBRID_FRAME::encode3(packet, lacf) : HYBRID_FRAME::encode(packet, lacf)) {
                 Utils::println("LACF frame: " + String(lacf.size()) + " B instead of " + String(text.length() + 3) + " B");
                 txFrameClass = EventsFormat::HYBRID;
                 txAirBytes   = lacf.size();
@@ -493,6 +501,11 @@ namespace LoRa_Utils {
                         freqError   = radio.getFrequencyError();
                         MQTT_Utils::publishUndecoded(undecoded, EventsFormat::classify(badBuf, badLen), badBuf, badLen, rssi, snr, freqError);
                         undecoded = -1;
+                    }
+                    if (rxRelayOnly) {                  // not decoded, but it may be relayed (3.0.0-dev.1): the digipeater's rule decides, the frame is not otherwise used
+                        rssi = radio.getRSSI(); snr = radio.getSNR(); freqError = radio.getFrequencyError();
+                        DIGI_Utils::processRelayOnly(String(relayOnlyFront.c_str()), relayOnlyKey, rssi, snr, freqError);
+                        rxRelayOnly = false;
                     }
                     packet = "";
                 }

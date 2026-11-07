@@ -191,6 +191,30 @@ namespace DIGI_Utils {
         return "";
     }
 
+    // A 3C FF 03 frame whose model (or destination code) this station does not hold (3.0.0-dev.1, spec 12, "Relay without the model"): LoRa_Utils checked its structure and
+    // CRC and gave its front, "SRC>DST,PATH:". The digipeater's own path rule is applied to that, and the frame is relayed with the resulting path, its content copied as received.
+    // The frame is not shown, gated, put on the web page or sent to MQTT or the TNC (it was never decoded), and if it cannot be relayed as a frame it is dropped:
+    // the placeholder text is never transmitted.
+    void processRelayOnly(const String& front, unsigned key, int rssi, float snr, int freqError) {
+        if (!Config.loramodule.txActive || !(Config.digi.mode == 1 || Config.digi.mode == 2 || Config.digi.mode == 3 || backupDigiMode)) return;
+        if (Config.loramodule.txFormat != 3 && Config.loramodule.txFormat != 4) return;            // only a station that sends LACF frames relays one
+        const String packet = front + ">";                                                          // a placeholder information field: the path is all that is used
+        lastAprsPacket = APRSPacketLib::processReceivedPacket(packet, rssi, snr, freqError);
+        if (lastAprsPacket.path.indexOf("NOGATE") >= 0) return;
+        const String stationCallsign = Config.tacticalCallsign == "" ? Config.callsign : Config.tacticalCallsign;
+        if (lastAprsPacket.sender == stationCallsign) return;                                       // avoid listening to self packets
+        if (Config.tacticalCallsign == "" && !Utils::callsignIsValid(lastAprsPacket.sender)) return;
+        if (STATION_Utils::isIn25SegHashBuffer(lastAprsPacket.sender, String(key, HEX))) return;    // a repeat of a frame just relayed: the CRC is its identity
+        const String loraPacket = generateDigipeatedPacket(packet);
+        if (loraPacket == "") return;
+        RelayFrame relay;
+        if (LoRa_Utils::buildRelayFrame(loraPacket, relay)) {
+            STATION_Utils::addToOutputPacketBuffer(loraPacket, false, &relay);
+            if (Config.digi.ecoMode != 1) displayToggle(true);
+            lastScreenOn = millis();
+        }
+    }
+
     void processLoRaPacket(const String& packet) {
         if (lastAprsPacket.path.indexOf("NOGATE") >= 0) return;
 

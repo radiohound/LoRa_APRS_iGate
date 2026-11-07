@@ -2,6 +2,7 @@
 #include "hybrid_frame.h"
 #include "vectors.h"
 #include "relay_vectors.h"
+#include "vectors3.h"
 #include "rxt_scale.h"
 #include <algorithm>
 #include <cstdio>
@@ -98,6 +99,47 @@ int main() {
     EXPECT("frequency offset is symmetric", RXT_Scale::frequencyOffset(1000) + RXT_Scale::frequencyOffset(-1000) == 90);
     EXPECT("time to hop clamps", RXT_Scale::timeToHop(0, 327.68f) == 0 && RXT_Scale::timeToHop(100000000UL, 327.68f) == 89);
     EXPECT("every scale stays within 0 to 89", RXT_Scale::rssi(-100.4f) <= 89 && RXT_Scale::snr(0.3f) <= 88 && RXT_Scale::frequencyOffset(2499) <= 89);
+    // ---- 3.0.0-dev.1 (frame type 3C FF 03, spec 12): a second decoder next to the 2.0.0 one
+    for (const HbVec& v : HB3_VECTORS) {
+        std::string tnc2 = hexText(v.tnc2), back;
+        std::vector<uint8_t> frame;
+        EXPECT("type03 encode", HYBRID_FRAME::encode3(tnc2, frame));
+        EXPECT("type03 encode bytes", frame == hexBytes(v.frame));
+        EXPECT("type03 decode", HYBRID_FRAME::decode(frame.data(), frame.size(), back) && back == tnc2);
+        EXPECT("type03 is hybrid", HYBRID_FRAME::isHybrid(frame.data(), frame.size()));
+    }
+    for (const RelayVec& v : RELAY3_VECTORS) {
+        std::vector<uint8_t> rx = hexBytes(v.rx), want = hexBytes(v.relayed), got;
+        const uint8_t tuple[4] = { 50, 20, 45, 10 };
+        int off = -2;
+        EXPECT("type03 relay", HYBRID_FRAME::relay(rx.data(), rx.size(), hexText(v.tnc2), "N0RLY-1", tuple, got, &off) && got == want);
+    }
+    {   // the same bytes with the other type byte are read by neither decoder
+        std::vector<uint8_t> f03 = hexBytes(HB3_VECTORS[0].frame), f02 = hexBytes(HB_VECTORS[0].frame), a = f03, b = f02;
+        std::string out;
+        a[2] = 0x02; b[2] = 0x03;
+        EXPECT("type 02 marker on a 03 frame", !HYBRID_FRAME::decode(a.data(), a.size(), out));
+        EXPECT("type 03 marker on a 02 frame", !HYBRID_FRAME::decode(b.data(), b.size(), out));
+        EXPECT("front() is for type 03 only", !HYBRID_FRAME::front(f02.data(), f02.size(), out));
+    }
+    // relay without the model, with the digipeater's own path: a frame this station cannot decode is relayed from its front
+    for (const PassVec& v : PASS3_VECTORS) {
+        std::vector<uint8_t> rx = hexBytes(v.rx), want = hexBytes(v.relayed), got;
+        std::string back, front, newFront;
+        unsigned key = 0, key2 = 0;
+        EXPECT("pass: not decodable here", !HYBRID_FRAME::decode(rx.data(), rx.size(), back));
+        EXPECT("pass: front", HYBRID_FRAME::front(rx.data(), rx.size(), front, &key) && front.find('>') != std::string::npos && front.back() == ':');
+        EXPECT("pass: front of the relayed frame", HYBRID_FRAME::front(want.data(), want.size(), newFront, &key2));   // the new path: what the digipeater's rule would give
+        EXPECT("pass: the CRC is the frame's identity", key == key2);
+        const uint8_t tuple[4] = { 50, 20, 45, 10 };
+        int off = -2;
+        EXPECT("pass: relayed with the caller's path", HYBRID_FRAME::relay(rx.data(), rx.size(), newFront, "N0RLY-1", tuple, got, &off) && got == want);
+    }
+    for (const char* h : PASS3_DAMAGED) {                                // damaged in the content: the CRC is over the bytes as sent, so even a relay without the model refuses it
+        std::vector<uint8_t> rx = hexBytes(h); std::string front;
+        EXPECT("pass: a damaged frame has no front", !HYBRID_FRAME::front(rx.data(), rx.size(), front));
+    }
+
     printf("%d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

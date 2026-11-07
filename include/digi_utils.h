@@ -27,6 +27,7 @@ namespace DIGI_Utils {
     String  buildPacket(const String& path, const String& packet, bool crossFreq);
     String  generateDigipeatedPacket(const String& packet);
     void    processLoRaPacket(const String& packet);
+    void    processRelayOnly(const String& front, unsigned key, int rssi, float snr, int freqError);   // a 3C FF 03 frame this station cannot decode: repeated by the digipeater's own rule, never shown, gated or sent as text
 
 }
 
