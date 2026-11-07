@@ -24,6 +24,7 @@ namespace EventsFormat {
                 case 0x81: return PPM_FULL;
                 case 0xC1: return PPM_PRIMED;
                 case 0x02: return (len >= 4 && (f[3] & 3) >= 2) ? HYBRID : NATIVE;
+                case 0x03: return HYBRID;      // LACF 3.0.0-dev.1: whatever its kind, the collector sees it as it sees LACF 2.0.0
                 default:   break;
             }
         }

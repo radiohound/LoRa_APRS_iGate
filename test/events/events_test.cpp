@@ -1,5 +1,7 @@
 // Prints a few event lines (NDJSON) made by EventsFormat; check.py feeds them to the collector.
 #include <stdio.h>
+#include <stdint.h>
+#include <vector>
 #include "events_format.h"
 
 static int check_private() {
@@ -22,9 +24,31 @@ static int check_private() {
     return bad;
 }
 
+// The class a frame is reported as, from its first bytes (used for frames that cannot be decoded and for CRC errors).
+static int check_classify() {
+    using namespace EventsFormat;
+    int bad = 0;
+    struct { const char* what; std::vector<uint8_t> f; int want; } c[] = {
+        { "plain 3C FF 01",                        { 0x3C, 0xFF, 0x01, 'A' },             PLAIN },
+        { "whole-text PPM 3C FF 81",               { 0x3C, 0xFF, 0x81, 0x00 },            PPM_FULL },
+        { "primed PPM 3C FF C1",                   { 0x3C, 0xFF, 0xC1, 0x00 },            PPM_PRIMED },
+        { "LACF 2.0.0, kind 2 (LACF content)",     { 0x3C, 0xFF, 0x02, 0x22, 0x00 },      HYBRID },
+        { "LACF 2.0.0, kind 0 (plain content)",    { 0x3C, 0xFF, 0x02, 0x20, 0x00 },      NATIVE },
+        { "LACF 3.0.0-dev.1, kind 2",              { 0x3C, 0xFF, 0x03, 0x22, 0x00 },      HYBRID },
+        { "LACF 3.0.0-dev.1, kind 0",              { 0x3C, 0xFF, 0x03, 0x20, 0x00 },      HYBRID },      // every kind of type 03 is hybrid, as 2.0.0 is for the collector
+        { "LACF 3.0.0-dev.1, three bytes only",    { 0x3C, 0xFF, 0x03 },                  HYBRID },
+        { "another type byte",                     { 0x3C, 0xFF, 0x04, 0x00 },            UNKNOWN },
+        { "not a LoRa APRS frame",                 { 0x00, 0x01, 0x02 },                  UNKNOWN },
+        { "too short",                             { 0x3C, 0xFF },                        UNKNOWN },
+    };
+    for (auto& k : c) if (classify(k.f.data(), k.f.size()) != k.want) { printf("classify wrong for: %s\n", k.what); bad++; }
+    printf("classify: %d cases, %d wrong\n", (int)(sizeof c / sizeof c[0]), bad);
+    return bad;
+}
+
 int main(int argc, char** argv) {
     (void)argv;
-    if (argc > 1) return check_private();
+    if (argc > 1) return check_private() + check_classify();
     EventsFormat::Head h = { "a1b2c3d4", 1, 1793545200123LL, "K6ATV-14" };
     EventsFormat::Radio r = { 433775000, 125000, 12, 5 };
     EventsFormat::Counts c = { { 5, 2, 1, 0, 0, 3 }, 0, 0, 4 };
