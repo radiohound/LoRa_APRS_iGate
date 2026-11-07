@@ -84,7 +84,10 @@ namespace HYBRID_FRAME {
             else if (j.op == OP_RELAY) j.result = relayRun(j);
             else if (j.op == OP_FRONT) {
                 hb3_info_t i3;
-                j.result = (long)hb3_decode_front(j.frame, j.frameLen, j.text, j.textCap, &i3);
+                // Spec 12 step 8: only a model or a destination code this station does not hold may be relayed unread. Any other reason for a failed decode (a payload that is not
+                // canonical, a NUL in the text, a size or content rule) is a damaged frame, even with a good CRC, and is not relayed. The full decode runs first to tell them apart.
+                const long why = (long)hb3_decode(j.frame, j.frameLen, j.text, j.textCap, &i3);
+                j.result = (why == HB3_ERR_VERSION || why == HB3_ERR_FRONT) ? (long)hb3_decode_front(j.frame, j.frameLen, j.text, j.textCap, &i3) : -1;
                 if (j.result > 0) {                                                       // the CRC-16 bytes: after V, the capability bytes if any, and L (LACF content only)
                     size_t cs = i3.content_start, off = cs + 1 + ((j.frame[cs] & 0x80) ? 4 : 0) + (((j.frame[3] & 3) < 2) ? 0 : 1);
                     j.key = (unsigned)(j.frame[off] | (j.frame[off + 1] << 8));

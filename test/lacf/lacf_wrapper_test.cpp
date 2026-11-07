@@ -4,6 +4,7 @@
 #include "relay_vectors.h"
 #include "vectors3.h"
 #include "capvectors3.h"
+#include "reject3.h"
 #include "lacf_capability.h"
 extern "C" {
 #include "hb3.h"
@@ -143,6 +144,17 @@ int main() {
     for (const char* h : PASS3_DAMAGED) {                                // damaged in the content: the CRC is over the bytes as sent, so even a relay without the model refuses it
         std::vector<uint8_t> rx = hexBytes(h); std::string front;
         EXPECT("pass: a damaged frame has no front", !HYBRID_FRAME::front(rx.data(), rx.size(), front));
+    }
+
+    // only a model or a destination code we do not hold may be relayed unread (spec 12 step 8): every other rejection vector is a damaged frame, even with a good CRC
+    for (const char* h : REJECT3_RELAYABLE) {
+        std::vector<uint8_t> rx = hexBytes(h); std::string back, front;
+        EXPECT("reject: not decodable here", !HYBRID_FRAME::decode(rx.data(), rx.size(), back));
+        EXPECT("reject: a model we do not hold has a front", HYBRID_FRAME::front(rx.data(), rx.size(), front));
+    }
+    for (const char* h : REJECT3_NOT_RELAYABLE) {
+        std::vector<uint8_t> rx = hexBytes(h); std::string front;
+        EXPECT("reject: a damaged frame has no front", !HYBRID_FRAME::front(rx.data(), rx.size(), front));
     }
 
     // ---- capability bytes (3.0.0-dev.1, spec 12): the firmware module, and the wrapper against the reference vectors
